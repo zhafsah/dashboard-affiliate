@@ -37,6 +37,14 @@ def bersihkan_tag(x):
     if s.endswith('----'): s = s[:-4]
     return s
 
+# Fungsi otomatis mencari nama kolom berdasarkan kata kunci (Pencegah KeyError)
+def cari_kolom(list_kolom, kata_kunci_list, default_name):
+    for col in list_kolom:
+        for kw in kata_kunci_list:
+            if kw.lower() in str(col).lower():
+                return col
+    return default_name
+
 # Fungsi pewarnaan bersyarat untuk baris tabel summary harian
 def gaya_tabel_summary(row):
     gaya = [''] * len(row)
@@ -57,14 +65,11 @@ def gaya_tabel_summary(row):
 def gaya_tabel_detail(row):
     gaya = [''] * len(row)
     
-    # 1. Highlight warna background untuk Iklan Aktif agar beda dengan organik
     if row['Tipe'] == "IKLAN (AKTIF)":
         gaya = ['background-color: #f0f4f8; border-left: 4px solid #1f77b4;'] * len(row)
         
-    # 2. Pewarnaan teks kolom kebocoran
     warna_kebocoran = 'green' if row['Klik_Shopee'] > row['Klik_Meta'] else 'red'
     if 'Kebocoran' in row.index:
-        # Gabungkan gaya background dan warna teks khusus untuk kolom kebocoran
         bg_style = 'background-color: #f0f4f8;' if row['Tipe'] == "IKLAN (AKTIF)" else ''
         gaya[row.index.get_loc('Kebocoran')] = f'{bg_style} color: {warna_kebocoran}; font-weight: bold;'
         
@@ -74,7 +79,6 @@ def gaya_tabel_detail(row):
 # 3. AREA UPLOAD FILE DI BAGIAN ATAS
 # ==========================================
 with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
-    # Menggunakan form agar inputan file uploader otomatis kosong/bersih kembali setelah submit
     with st.form("form_upload", clear_on_submit=True):
         col_input1, col_input2, col_input3 = st.columns([1.5, 1.5, 3])
         
@@ -119,11 +123,22 @@ if tombol_proses:
 
         if df_meta is not None and df_clicks is not None and df_sales is not None:
             df_sales.columns = df_sales.columns.str.strip()
-            kolom_pesanan = 'ID pesanan' if 'ID pesanan' in df_sales.columns else ('ID Pemesanan' if 'ID Pemesanan' in df_sales.columns else df_sales.columns[0])
+            
+            # Deteksi Kolom Penjualan Shopee secara Pintar & Dinamis
+            kolom_pesanan = cari_kolom(df_sales.columns, ['id pesanan', 'id pemesanan', 'order id'], df_sales.columns[0])
+            kolom_tag_sales = cari_kolom(df_sales.columns, ['tag_link1', 'tag link', 'sub id'], 'Tag_link1')
+            kolom_komisi_kotor = cari_kolom(df_sales.columns, ['total komisi per pesanan', 'komisi kotor'], df_sales.columns[-1])
+            kolom_komisi_bersih = cari_kolom(df_sales.columns, ['komisi bersih affiliate', 'komisi bersih'], kolom_komisi_kotor)
+            
+            # Deteksi kolom nama produk, kategori, dan jumlah item (Solusi Utama Error)
+            kolom_nama_produk = cari_kolom(df_sales.columns, ['nama produk', 'product name', 'item'], 'Nama Produk')
+            kolom_kategori_produk = cari_kolom(df_sales.columns, ['kategori kunci', 'kategori', 'category'], 'Kategori')
+            kolom_jumlah_item = cari_kolom(df_sales.columns, ['item terjual', 'jumlah', 'quantity', 'qty'], 'Item Terjual')
 
+            # Proses Normalisasi Tag
             df_meta['Clean_Tag'] = df_meta['Nama iklan'].apply(bersihkan_tag)
-            df_sales['Clean_Tag'] = df_sales['Tag_link1'].apply(bersihkan_tag)
             df_clicks['Clean_Tag'] = df_clicks['Tag_link'].apply(bersihkan_tag)
+            df_sales['Clean_Tag'] = df_sales[kolom_tag_sales].apply(bersihkan_tag)
 
             # Kumpulan tag yang aktif di Meta Ads
             ad_tags = set(df_meta[df_meta['Jumlah yang dibelanjakan (IDR)'] > 0]['Clean_Tag'].unique())
@@ -140,8 +155,8 @@ if tombol_proses:
             # C. Mengolah Data Penjualan & Komisi Shopee
             sales_sum = df_sales.groupby('Clean_Tag').agg(
                 Pesanan=(kolom_pesanan, 'nunique'),
-                Komisi_Kotor=('Total Komisi per Pesanan(Rp)', 'sum'),
-                Komisi_Bersih=('Komisi Bersih Affiliate (Rp)', 'sum')
+                Komisi_Kotor=(kolom_komisi_kotor, 'sum'),
+                Komisi_Bersih=(kolom_komisi_bersih, 'sum')
             ).reset_index()
 
             # Penggabungan Data Detail untuk Hasil Bedah Data Rinci
@@ -167,7 +182,7 @@ if tombol_proses:
             komisi_iklan_nett = merged[merged['Clean_Tag'].isin(ad_tags)]['Komisi_Kotor'].sum()
             komisi_organik_nett = merged[~merged['Clean_Tag'].isin(ad_tags)]['Komisi_Kotor'].sum()
             
-            total_komisi_nett = df_sales['Komisi Bersih Affiliate (Rp)'].sum() if 'Komisi Bersih Affiliate (Rp)' in df_sales.columns else total_komisi_kotor
+            total_komisi_nett = df_sales[kolom_komisi_bersih].sum() if kolom_komisi_bersih in df_sales.columns else total_komisi_kotor
             total_profit = total_komisi_nett - total_spend
 
             # Membuat baris rangkuman baru
@@ -185,18 +200,20 @@ if tombol_proses:
                 st.session_state['riwayat_summary'] = pd.concat([st.session_state['riwayat_summary'], new_summary], ignore_index=True)
                 st.session_state['detail_laporan_data'][nama_laporan] = merged
                 
-                # Simpan data mentah sales untuk rincian produk nanti
-                st.session_state['raw_sales_data'][nama_laporan] = df_sales[[
-                    'Clean_Tag', 'Nama Produk', 'Kategori Kunci' if 'Kategori Kunci' in df_sales.columns else 'Kategori', 
-                    'Item Terjual' if 'Item Terjual' in df_sales.columns else 'Jumlah', 'Total Komisi per Pesanan(Rp)'
-                ]].copy()
+                # Pembuatan dataframe penampung rincian produk yang aman dari KeyError
+                df_raw_save = pd.DataFrame()
+                df_raw_save['Clean_Tag'] = df_sales['Clean_Tag']
+                df_raw_save['Nama Produk'] = df_sales[kolom_nama_produk] if kolom_nama_produk in df_sales.columns else "Produk Tidak Diketahui"
+                df_raw_save['Kategori'] = df_sales[kolom_kategori_produk] if kolom_kategori_produk in df_sales.columns else "Umum"
+                df_raw_save['Item Terjual'] = pd.to_numeric(df_sales[kolom_jumlah_item], errors='coerce').fillna(1)
+                df_raw_save['Komisi'] = pd.to_numeric(df_sales[kolom_komisi_kotor], errors='coerce').fillna(0)
+                
+                st.session_state['raw_sales_data'][nama_laporan] = df_raw_save
                 
                 st.success(f"✅ Laporan '{nama_laporan}' berhasil diproses dan disimpan! Isian berkas otomatis dikosongkan.")
                 st.rerun()
             else:
                 st.warning("Nama laporan sudah ada. Harap gunakan nama laporan yang berbeda.")
-        else:
-            st.error("Struktur kolom file CSV tidak cocok. Pastikan Anda mengunggah file yang benar.")
 
 st.markdown("---")
 
@@ -317,16 +334,14 @@ else:
         if nama_laporan_klik in st.session_state['detail_laporan_data']:
             df_detail_tampil = st.session_state['detail_laporan_data'][nama_laporan_klik]
             
-            # Perhitungan Akumulasi Total Berurutan Sesuai Request Terbaru
+            # Perhitungan Akumulasi Total Berurutan Iklan Aktif
             df_iklan_aktif = df_detail_tampil[df_detail_tampil['Tipe'] == "IKLAN (AKTIF)"]
             total_spend_iklan = df_iklan_aktif['Spend'].sum()
             total_klik_meta_iklan = df_iklan_aktif['Klik_Meta'].sum()
             total_klik_shopee_iklan = df_iklan_aktif['Klik_Shopee'].sum()
-            
-            # Hitung ROAS Gabungan Iklan Aktif
             roas_iklan_gabungan = (df_iklan_aktif['Komisi_Kotor'].sum() / total_spend_iklan) if total_spend_iklan > 0 else 0.0
             
-            # Tampilan Metrik Berurutan 
+            # Tampilan Metrik Berurutan 4 Kolom Utama
             col_ad1, col_ad2, col_ad3, col_ad4 = st.columns(4)
             with col_ad1:
                 st.metric(label="💳 Total Spend Iklan (Iklan Aktif)", value=f"Rp {total_spend_iklan:,.0f}")
@@ -371,18 +386,12 @@ else:
                 
                 if nama_laporan_klik in st.session_state['raw_sales_data']:
                     df_raw_sales = st.session_state['raw_sales_data'][nama_laporan_klik]
-                    
-                    # Filter data pesanan shopee berdasarkan tag kontent video yang sedang diklik
                     df_produk_terfilter = df_raw_sales[df_raw_sales['Clean_Tag'] == tag_terpilih]
                     
                     if not df_produk_terfilter.empty:
-                        # Menyelaraskan nama kolom output
-                        kolom_kat = df_produk_terfilter.columns[2]
-                        kolom_qty = df_produk_terfilter.columns[3]
-                        
-                        df_produk_tampil = df_produk_terfilter.groupby(['Nama Produk', kolom_kat]).agg(
-                            Item_Terjual=(kolom_qty, 'sum'),
-                            Komisi_Diterima=('Total Komisi per Pesanan(Rp)', 'sum')
+                        df_produk_tampil = df_produk_terfilter.groupby(['Nama Produk', 'Kategori']).agg(
+                            Item_Terjual=('Item Terjual', 'sum'),
+                            Komisi_Diterima=('Komisi', 'sum')
                         ).reset_index()
                         
                         df_produk_tampil.columns = ['Nama Produk', 'Kategori', 'Item Terjual', 'Komisi']
