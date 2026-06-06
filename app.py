@@ -145,7 +145,7 @@ if tombol_proses:
             kolom_kategori_produk = cari_kolom(df_sales.columns, ['kategori kunci', 'kategori', 'category'], 'Kategori')
             kolom_jumlah_item = cari_kolom(df_sales.columns, ['item terjual', 'jumlah', 'quantity', 'qty'], 'Item Terjual')
 
-            # 🔥 FUNGSI BERSIHKAN ANGKA SAKTI INDONESIA (Anti Rp 90 desimal)
+            # Fungsi Pembersih Angka Format Indonesia
             def bersihkan_angka_sakti(series):
                 def konversi_nilai(val):
                     val = str(val).strip().replace('Rp', '').replace(' ', '').replace(' ', '')
@@ -169,7 +169,7 @@ if tombol_proses:
                         return 0.0
                 return series.apply(konversi_nilai)
 
-            # Normalisasi data angka di awal sebelum pemrosesan
+            # Normalisasi data angka awal sebelum pemrosesan
             df_meta['Jumlah yang dibelanjakan (IDR)'] = bersihkan_angka_sakti(df_meta['Jumlah yang dibelanjakan (IDR)'])
             if 'Klik tautan' in df_meta.columns:
                 df_meta['Klik tautan'] = bersihkan_angka_sakti(df_meta['Klik tautan']).fillna(0).astype(int)
@@ -195,13 +195,16 @@ if tombol_proses:
             merged['Kebocoran'] = merged.apply(lambda r: ((r['Klik_Meta'] - r['Klik_Shopee']) / r['Klik_Meta']) * 100 if r['Klik_Meta'] > 0 else 0.0, axis=1)
             merged['Profit_Rugi'] = merged['Komisi_Bersih'] - merged['Spend']
             merged['ROAS'] = merged.apply(lambda r: r['Komisi_Bersih'] / r['Spend'] if r['Spend'] > 0 else 0.0, axis=1)
-            merged = merged[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']]
             
+            # 🔥 PERBAIKAN UTAMA: Hitung total kalkulasi sebelum struktur tabel di-subset
             total_spend = merged['Spend'].sum()
             komisi_iklan_nett = merged[merged['Tipe'] == "IKLAN (AKTIF)"]["Komisi_Bersih"].sum()
             komisi_organik_nett = merged[merged['Tipe'] == "ORGANIK"]["Komisi_Bersih"].sum()
             total_komisi_nett = df_sales[kolom_komisi_bersih].sum()
             total_profit = total_komisi_nett - total_spend
+
+            # Memperkecil tabel untuk disimpan (Opsional)
+            merged = merged[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']]
 
             # 💾 EKSEKUSI SIMPAN PERMANEN KE GOOGLE SHEETS
             try:
