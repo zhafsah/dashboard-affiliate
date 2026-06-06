@@ -171,7 +171,7 @@ if tombol_proses:
                     df_meta = df_temp
                 elif 'Klik ID' in df_temp.columns and 'Tag_link' in df_temp.columns:
                     df_clicks = df_temp
-                elif any(k dalam str(df_temp.columns).lower() for k in ['komisi per pesanan', 'komisi bersih', 'nama produk', 'product name', 'info produk']):
+                elif any(k in str(df_temp.columns).lower() for k in ['komisi per pesanan', 'komisi bersih', 'nama produk', 'product name', 'info produk']):
                     df_sales = df_temp
 
         if df_meta is not None and df_clicks is not None and df_sales is not None:
@@ -187,7 +187,7 @@ if tombol_proses:
             # Pembersih Format Angka Rupiah
             def bersihkan_angka_sakti(series):
                 def konversi_nilai(val):
-                    val = str(val).strip().replace('Rp', '').replace(' ', '').replace(' ', '')
+                    val = str(val).strip().replace('Rp', '').replace(' ', '')
                     if not val or val.lower() == 'nan' or val == '-': return 0.0
                     if ',' in val and '.' in val:
                         if val.find('.') < val.find(','): val = val.replace('.', '').replace(',', '.')
