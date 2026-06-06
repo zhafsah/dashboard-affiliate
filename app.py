@@ -78,20 +78,25 @@ def gaya_tabel_detail(row):
 # ==========================================
 # 3. AREA UPLOAD FILE DI BAGIAN ATAS
 # ==========================================
+### 
 with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
-    col_input1, col_input2, col_input3 = st.columns([1.5, 1.5, 3])
-    
-    with col_input2:
-        tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
-        tgl_obj = tanggal_laporan
-        nama_bulan = BULAN_INDO[tgl_obj.month]
-        default_nama = f"Laporan {tgl_obj.day:02d} {nama_bulan}"
+    # Menggunakan form agar inputan file uploader otomatis kosong/bersih kembali setelah submit
+    with st.form("form_upload", clear_on_submit=True):
+        col_input1, col_input2, col_input3 = st.columns([1.5, 1.5, 3])
         
-    with col_input1:
-        nama_laporan = st.text_input("Nama / Catatan Laporan:", value=default_nama)
+        with col_input2:
+            tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
+            tgl_obj = tanggal_laporan
+            nama_bulan = BULAN_INDO[tgl_obj.month]
+            default_nama = f"Laporan {tgl_obj.day:02d} {nama_bulan}"
+            
+        with col_input1:
+            nama_laporan = st.text_input("Nama / Catatan Laporan:", value=default_nama)
+            
+        with col_input3:
+            uploaded_files = st.file_uploader("Pilih berkas CSV iklan, klik, dan penjualan:", type=["csv"], accept_multiple_files=True)
         
-    with col_input3:
-        uploaded_files = st.file_uploader("Pilih berkas CSV iklan, klik, dan penjualan:", type=["csv"], accept_multiple_files=True)
+        st.markdown("<br>", unsafe_allow_html=True)
     
     # Tombol eksekusi manual agar tidak langsung memproses otomatis
     st.markdown("<br>", unsafe_allow_html=True)
