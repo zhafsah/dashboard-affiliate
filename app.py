@@ -10,12 +10,18 @@ st.set_page_config(page_title="Affiliate Advanced Analytics", layout="wide")
 st.title("📊 Dashboard Evaluasi & Performa Affiliate")
 st.write("Kelola pengeluaran iklan Meta dan optimalkan komisi bersih Shopee Anda dalam satu layar.")
 
+# Kamus untuk mengubah nama bulan ke bahasa Indonesia
+BULAN_INDO = {
+    1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni",
+    7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"
+}
+
 # ==========================================
 # 2. INISIALISASI MEMORI (SESSION STATE)
 # ==========================================
 if 'riwayat_summary' not in st.session_state:
     st.session_state['riwayat_summary'] = pd.DataFrame(columns=[
-        "Tanggal", "Nama Laporan", "Spend", "Komisi Kotor", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"
+        "Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"
     ])
 if 'detail_laporan_data' not in st.session_state:
     st.session_state['detail_laporan_data'] = {}
@@ -29,22 +35,32 @@ def bersihkan_tag(x):
     if s.endswith('----'): s = s[:-4]
     return s
 
-# Fungsi pewarnaan bersyarat untuk baris tabel summary
+# Fungsi pewarnaan bersyarat untuk baris tabel summary harian
 def gaya_tabel_summary(row):
     gaya = [''] * len(row)
     
-    # 1. Warnai kolom Komisi Iklan berdasarkan (Komisi Iklan - Spend)
+    # Warnai kolom Komisi Iklan berdasarkan (Komisi Iklan - Spend)
     profit_iklan = row['Komisi Iklan'] - row['Spend']
     warna_iklan = 'green' if profit_iklan >= 0 else 'red'
-    gaya[row.index.get_loc('Komisi Iklan')] = f'color: {warna_iklan}; font-weight: bold;'
+    if 'Komisi Iklan' in row.index:
+        gaya[row.index.get_loc('Komisi Iklan')] = f'color: {warna_iklan}; font-weight: bold;'
     
-    # 2. Warnai kolom Total Komisi (Nett) berdasarkan Profit keseluruhan
+    # Warnai kolom Total Komisi (Nett) dan Profit keseluruhan
     warna_total = 'green' if row['Profit'] >= 0 else 'red'
-    gaya[row.index.get_loc('Total Komisi (Nett)')] = f'color: {warna_total}; font-weight: bold;'
+    if 'Total Komisi (Nett)' in row.index:
+        gaya[row.index.get_loc('Total Komisi (Nett)')] = f'color: {warna_total}; font-weight: bold;'
+    if 'Profit' in row.index:
+        gaya[row.index.get_loc('Profit')] = f'color: {warna_total}; font-weight: bold;'
     
-    # 3. Warnai kolom Profit keseluruhan
-    gaya[row.index.get_loc('Profit')] = f'color: {warna_total}; font-weight: bold;'
-    
+    return gaya
+
+# Fungsi pewarnaan kolom kebocoran pada tabel detail rinci
+def gaya_tabel_detail(row):
+    gaya = [''] * len(row)
+    # Jika Klik Shopee > Klik Meta maka hijau, jika tidak maka merah
+    warna_kebocoran = 'green' if row['Klik_Shopee'] > row['Klik_Meta'] else 'red'
+    if 'Kebocoran' in row.index:
+        gaya[row.index.get_loc('Kebocoran')] = f'color: {warna_kebocoran}; font-weight: bold;'
     return gaya
 
 # ==========================================
@@ -52,10 +68,17 @@ def gaya_tabel_summary(row):
 # ==========================================
 with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
     col_input1, col_input2, col_input3 = st.columns([1.5, 1.5, 3])
-    with col_input1:
-        nama_laporan = st.text_input("Nama / Catatan Laporan:", placeholder="Contoh: Laporan 04 Jun")
+    
     with col_input2:
         tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
+        # Generate otomatis nama laporan berdasarkan tanggal yang dipilih
+        tgl_obj = tanggal_laporan
+        nama_bulan = BULAN_INDO[tgl_obj.month]
+        default_nama = f"Laporan {tgl_obj.day:02d} {nama_bulan}"
+        
+    with col_input1:
+        nama_laporan = st.text_input("Nama / Catatan Laporan:", value=default_nama)
+        
     with col_input3:
         uploaded_files = st.file_uploader("", type=["csv"], accept_multiple_files=True)
 
@@ -125,11 +148,9 @@ if len(uploaded_files) >= 3 and nama_laporan:
         total_spend = merged['Spend'].sum()
         total_komisi_kotor = merged['Komisi_Kotor'].sum()
         
-        # Memisahkan Komisi Iklan vs Organik berdasarkan sumber tag
         komisi_iklan_nett = merged[merged['Clean_Tag'].isin(ad_tags)]['Komisi_Kotor'].sum()
         komisi_organik_nett = merged[~merged['Clean_Tag'].isin(ad_tags)]['Komisi_Kotor'].sum()
         
-        # Total Komisi (Nett) = Gabungan komisi bersih affiliate (karena Shopee memotong sebagian untuk pajak/biaya)
         total_komisi_nett = df_sales['Komisi Bersih Affiliate (Rp)'].sum() if 'Komisi Bersih Affiliate (Rp)' in df_sales.columns else total_komisi_kotor
         total_profit = total_komisi_nett - total_spend
 
@@ -138,7 +159,6 @@ if len(uploaded_files) >= 3 and nama_laporan:
             "Tanggal": tanggal_laporan, 
             "Nama Laporan": nama_laporan,
             "Spend": total_spend, 
-            "Komisi Kotor": total_komisi_kotor,
             "Komisi Iklan": komisi_iklan_nett,
             "Komisi Organik": komisi_organik_nett,
             "Total Komisi (Nett)": total_komisi_nett,
@@ -228,10 +248,8 @@ st.write("👉 **Silakan klik baris atau centang kotak** pada laporan di bawah u
 if df_filtered.empty:
     st.info("Belum ada laporan dalam rentang tanggal ini. Silakan unggah 3 file CSV Anda pada area upload di atas.")
 else:
-    # Memformat angka mata uang dan menyuntikkan aturan warna teks dinamis
     df_styled_summary = df_filtered.style.format({
         'Spend': 'Rp{:,.0f}',
-        'Komisi Kotor': 'Rp{:,.0f}',
         'Komisi Iklan': 'Rp{:,.0f}',
         'Komisi Organik': 'Rp{:,.0f}',
         'Total Komisi (Nett)': 'Rp{:,.0f}',
@@ -246,13 +264,31 @@ else:
         selection_mode="single-row"
     )
 
-    # ==========================================
-    # 7. AREA BEDAH DETAIL RINCI OPERASIONAL (PASCA KLIK)
-    # ==========================================
+    # ------------------------------------------
+    # FITUR TOMBOL HAPUS LAPORAN
+    # ------------------------------------------
     if event_pilih and len(event_pilih["selection"]["rows"]) > 0:
         indeks_terpilih = event_pilih["selection"]["rows"][0]
-        nama_laporan_klik = df_filtered.iloc[indeks_terpilih]["Nama Laporan"]
+        laporan_terpilih = df_filtered.iloc[indeks_terpilih]
+        nama_laporan_klik = laporan_terpilih["Nama Laporan"]
         
+        # Tombol hapus ditaruh presisi di bawah tabel utama
+        if st.button(f"🗑️ Hapus Laporan: {nama_laporan_klik}", type="secondary"):
+            # Hapus dari dataframe summary utama
+            st.session_state['riwayat_summary'] = st.session_state['riwayat_summary'][
+                st.session_state['riwayat_summary']['Nama Laporan'] != nama_laporan_klik
+            ].reset_index(drop=True)
+            
+            # Hapus dari penyimpanan data detail
+            if nama_laporan_klik in st.session_state['detail_laporan_data']:
+                del st.session_state['detail_laporan_data'][nama_laporan_klik]
+                
+            st.toast(f"Laporan '{nama_laporan_klik}' berhasil dihapus!")
+            st.rerun()
+
+        # ==========================================
+        # 7. AREA BEDAH DETAIL RINCI OPERASIONAL (PASCA KLIK)
+        # ==========================================
         st.markdown("---")
         st.subheader(f"🔍 Hasil Bedah Data Rinci: {nama_laporan_klik}")
         st.write("Berikut detail perbandingan performa konversi klik, pesanan, tingkat kebocoran data, omset komisi kotor, serta ROAS per video:")
@@ -260,17 +296,20 @@ else:
         if nama_laporan_klik in st.session_state['detail_laporan_data']:
             df_detail_tampil = st.session_state['detail_laporan_data'][nama_laporan_klik]
             
+            # Memformat angka dan memberikan warna dinamis khusus di kolom Kebocoran
+            df_styled_detail = df_detail_tampil.style.format({
+                'Spend': 'Rp{:,.0f}',
+                'Komisi_Kotor': 'Rp{:,.0f}',
+                'Profit_Rugi': 'Rp{:,.0f}',
+                'ROAS': '{:,.2f}x',
+                'Klik_Meta': '{:,.0f}',
+                'Klik_Shopee': '{:,.0f}',
+                'Pesanan': '{:,.0f}',
+                'Kebocoran': '{:,.2f}%'
+            }).apply(gaya_tabel_detail, axis=1)
+            
             st.dataframe(
-                df_detail_tampil.style.format({
-                    'Spend': 'Rp{:,.0f}',
-                    'Komisi_Kotor': 'Rp{:,.0f}',
-                    'Profit_Rugi': 'Rp{:,.0f}',
-                    'ROAS': '{:,.2f}x',
-                    'Klik_Meta': '{:,.0f}',
-                    'Klik_Shopee': '{:,.0f}',
-                    'Pesanan': '{:,.0f}',
-                    'Kebocoran': '{:,.2f}%'
-                }),
+                df_styled_detail,
                 use_container_width=True,
                 hide_index=True
             )
