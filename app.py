@@ -79,20 +79,21 @@ def gaya_tabel_detail(row):
 # 3. AREA UPLOAD FILE DI BAGIAN ATAS
 # ==========================================
 with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
+    # Kolom tanggal ditaruh di luar form agar ketika diubah, teks nama laporan langsung berubah seketika
+    tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
+    
+    # Generate teks default nama laporan berdasarkan tanggal yang dipilih diatas
+    nama_bulan = BULAN_INDO[tanggal_laporan.month]
+    default_nama = f"Laporan {tanggal_laporan.day:02d} {nama_bulan}"
+    
     # Menggunakan form agar inputan file uploader otomatis kosong/bersih kembali setelah submit
     with st.form("form_upload", clear_on_submit=True):
-        col_input1, col_input2, col_input3 = st.columns([1.5, 1.5, 3])
+        col_input1, col_input2 = st.columns([2, 4])
         
-        with col_input2:
-            tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
-            tgl_obj = tanggal_laporan
-            nama_bulan = BULAN_INDO[tgl_obj.month]
-            default_nama = f"Laporan {tgl_obj.day:02d} {nama_bulan}"
-            
         with col_input1:
             nama_laporan = st.text_input("Nama / Catatan Laporan:", value=default_nama)
             
-        with col_input3:
+        with col_input2:
             uploaded_files = st.file_uploader("Pilih berkas CSV iklan, klik, dan penjualan:", type=["csv"], accept_multiple_files=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
@@ -131,7 +132,7 @@ if tombol_proses:
             kolom_komisi_kotor = cari_kolom(df_sales.columns, ['total komisi per pesanan', 'komisi kotor'], df_sales.columns[-1])
             kolom_komisi_bersih = cari_kolom(df_sales.columns, ['komisi bersih affiliate', 'komisi bersih'], kolom_komisi_kotor)
             
-            # Deteksi kolom nama produk, kategori, dan jumlah item (Solusi Utama Error)
+            # Deteksi kolom nama produk, kategori, dan jumlah item
             kolom_nama_produk = cari_kolom(df_sales.columns, ['nama produk', 'product name', 'item'], 'Nama Produk')
             kolom_kategori_produk = cari_kolom(df_sales.columns, ['kategori kunci', 'kategori', 'category'], 'Kategori')
             kolom_jumlah_item = cari_kolom(df_sales.columns, ['item terjual', 'jumlah', 'quantity', 'qty'], 'Item Terjual')
@@ -201,7 +202,7 @@ if tombol_proses:
                 st.session_state['riwayat_summary'] = pd.concat([st.session_state['riwayat_summary'], new_summary], ignore_index=True)
                 st.session_state['detail_laporan_data'][nama_laporan] = merged
                 
-                # Pembuatan dataframe penampung rincian produk yang aman dari KeyError
+                # Pembuatan dataframe penampung rincian produk
                 df_raw_save = pd.DataFrame()
                 df_raw_save['Clean_Tag'] = df_sales['Clean_Tag']
                 df_raw_save['Nama Produk'] = df_sales[kolom_nama_produk] if kolom_nama_produk in df_sales.columns else "Produk Tidak Diketahui"
