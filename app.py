@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
+import json
 
 # ==========================================
 # 1. PENGATURAN HALAMAN & KONEKSI GOOGLE SHEETS
@@ -17,18 +18,23 @@ BULAN_INDO = {
     7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"
 }
 
-# Fungsi menghubungkan ke Google Sheets menggunakan Secrets Streamlit
+# Fungsi menghubungkan ke Google Sheets menggunakan trik Raw JSON Secrets
 @st.cache_resource
 def inisialisasi_gspread():
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
-    # Mengambil kredensial langsung dari st.secrets
-    kredensial_dict = dict(st.secrets["gauth"])
-    creds = Credentials.from_service_account_info(kredensial_dict, scopes=scopes)
-    client = gspread.authorize(creds)
-    return client
+    try:
+        # Membaca teks JSON mentah langsung dari secrets tanpa pecah baris manual
+        raw_json_teks = st.secrets["google_credentials"]["json_teks"]
+        kredensial_dict = json.loads(raw_json_teks)
+        creds = Credentials.from_service_account_info(kredensial_dict, scopes=scopes)
+        client = gspread.authorize(creds)
+        return client
+    except Exception as e:
+        st.error(f"❌ Format JSON di Secrets salah atau tidak terbaca: {str(e)}")
+        st.stop()
 
 try:
     gc = inisialisasi_gspread()
@@ -41,7 +47,6 @@ except Exception as e:
 # ==========================================
 # 2. LOAD DATA DARI GOOGLE SHEETS KE SYSTEM
 # ==========================================
-# Membaca data Riwayat Summary dari Google Sheets
 try:
     worksheet_summary = sheet_utama.worksheet("Riwayat_Summary")
     records_summary = worksheet_summary.get_all_records()
@@ -54,7 +59,6 @@ except:
     st.error("Tab 'Riwayat_Summary' tidak ditemukan di Google Sheets Anda.")
     st.stop()
 
-# Memasukkan data ter-load ke session state agar performa kencang saat di-klik
 st.session_state['riwayat_summary'] = df_load_summary
 
 # Fungsi pembantu untuk membersihkan tag
@@ -174,14 +178,12 @@ if tombol_proses:
 
             # 💾 EKSEKUSI SIMPAN PERMANEN KE GOOGLE SHEETS
             try:
-                # 1. Simpan ke Riwayat_Summary
                 worksheet_summary.append_row([
                     str(tanggal_laporan), nama_laporan, float(total_spend), 
                     float(komisi_iklan_nett), float(komisi_organik_nett), 
                     float(total_komisi_nett), float(total_profit)
                 ])
                 
-                # 2. Simpan ke Raw_Sales
                 worksheet_raw_sales = sheet_utama.worksheet("Raw_Sales")
                 rows_to_save = []
                 for _, row in df_sales.iterrows():
@@ -264,17 +266,13 @@ else:
         laporan_terpilih = df_filtered.iloc[indeks_terpilih]
         nama_laporan_klik = laporan_terpilih["Nama Laporan"]
         
-        # 🗑️ AKSI HAPUS DATA DARI GOOGLE SHEETS
         if st.button(f"🗑️ Hapus Laporan dari Cloud: {nama_laporan_klik}", type="secondary"):
             try:
-                # Ambil semua data summary terbaru, hapus barisnya di Google Sheets
                 cell = worksheet_summary.find(nama_laporan_klik)
                 worksheet_summary.delete_rows(cell.row)
                 
-                # Hapus rincian produknya di tab Raw_Sales
                 worksheet_raw_sales = sheet_utama.worksheet("Raw_Sales")
                 cells = worksheet_raw_sales.findall(nama_laporan_klik)
-                # Menghapus dari baris bawah ke atas agar indeks tidak bergeser
                 rows_to_del = sorted(list(set([c.row for c in cells])), reverse=True)
                 for r in rows_to_del:
                     worksheet_raw_sales.delete_rows(r)
@@ -290,7 +288,6 @@ else:
         st.markdown("---")
         st.subheader(f"🔍 Hasil Bedah Data Rinci: {nama_laporan_klik}")
         
-        # Penarikan data detail produk real-time khusus laporan ter-klik dari Google Sheets
         try:
             worksheet_raw_sales = sheet_utama.worksheet("Raw_Sales")
             all_sales_records = worksheet_raw_sales.get_all_records()
@@ -302,16 +299,13 @@ else:
         except:
             df_product_selected = pd.DataFrame()
 
-        # Rekonstruksi tabel detail operasional harian berdasarkan data penjualan real-time
         if not df_product_selected.empty:
             sales_sum_rec = df_product_selected.groupby('Clean_Tag').agg(
-                Pesanan=('Nama Produk', 'count'), # Estimasi total order
+                Pesanan=('Nama Produk', 'count'),
                 Komisi_Kotor=('Komisi', 'sum'),
-                Komisi_Bersih=('Komisi', 'sum') # Menggunakan komisi kotor sebagai basis hitung profit
+                Komisi_Bersih=('Komisi', 'sum')
             ).reset_index()
             
-            # Catatan: Karena data iklan Meta & Klik Shopee tidak di-backup terpisah demi efisiensi, 
-            # Nilai Meta & Klik akan dipasok otomatis 0 / menggunakan data kalkulasi internal default.
             sales_sum_rec['Tipe'] = sales_sum_rec['Clean_Tag'].apply(lambda x: "ORGANIK" if x == "Organik" else "IKLAN (AKTIF)")
             sales_sum_rec['Spend'] = sales_sum_rec.apply(lambda r: laporan_terpilih['Spend'] if r['Tipe'] == "IKLAN (AKTIF)" else 0, axis=1)
             sales_sum_rec['Klik_Meta'] = 0
@@ -329,9 +323,9 @@ else:
             roas_iklan_gabungan = (df_iklan_aktif['Komisi_Kotor'].sum() / total_spend_iklan) if total_spend_iklan > 0 else 0.0
             
             col_ad1, col_ad2, col_ad3, col_ad4 = st.columns(4)
-            with col_ad1: st.metric(label="💳 Total Spend Iklan (Iklan Aktif)", value=f"Rp {total_spend_iklan:,.0f}")
-            with col_ad2: st.metric(label="🎯 Total Klik Meta (Iklan Aktif)", value=f"{total_klik_meta_iklan:,.0f} Klik")
-            with col_ad3: st.metric(label="🛍️ Total Klik Shopee (Iklan Aktif)", value=f"{total_klik_shopee_iklan:,.0f} Klik")
+            with col_ad1: st.metric(label="💳 Total Spend Iklan (Iklan Active)", value=f"Rp {total_spend_iklan:,.0f}")
+            with col_ad2: st.metric(label="🎯 Total Klik Meta", value=f"{total_klik_meta_iklan:,.0f} Klik")
+            with col_ad3: st.metric(label="🛍️ Total Klik Shopee", value=f"{total_klik_shopee_iklan:,.0f} Klik")
             with col_ad4: st.metric(label="📊 ROAS (Iklan Aktif)", value=f"{roas_iklan_gabungan:,.2f}x")
             
             st.write("💡 *Baris bertanda warna **abu-biru muda** merupakan video yang dipasangi **Iklan Aktif**. Silakan klik baris di bawah untuk membedah produk terjual:*")
