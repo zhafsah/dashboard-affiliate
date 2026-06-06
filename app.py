@@ -14,7 +14,9 @@ st.write("Kelola pengeluaran iklan Meta dan optimalkan komisi bersih Shopee Anda
 # 2. INISIALISASI MEMORI (SESSION STATE)
 # ==========================================
 if 'riwayat_summary' not in st.session_state:
-    st.session_state['riwayat_summary'] = pd.DataFrame(columns=["Tanggal", "Nama Laporan", "Spend", "Komisi", "Profit", "Status"])
+    st.session_state['riwayat_summary'] = pd.DataFrame(columns=[
+        "Tanggal", "Nama Laporan", "Spend", "Komisi Kotor", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"
+    ])
 if 'detail_laporan_data' not in st.session_state:
     st.session_state['detail_laporan_data'] = {}
 
@@ -27,10 +29,23 @@ def bersihkan_tag(x):
     if s.endswith('----'): s = s[:-4]
     return s
 
-# Fungsi untuk mewarnai teks kolom Profit pada Riwayat Laporan Harian
-def warnai_profit(val):
-    color = 'green' if val >= 0 else 'red'
-    return f'color: {color}; font-weight: bold;'
+# Fungsi pewarnaan bersyarat untuk baris tabel summary
+def gaya_tabel_summary(row):
+    gaya = [''] * len(row)
+    
+    # 1. Warnai kolom Komisi Iklan berdasarkan (Komisi Iklan - Spend)
+    profit_iklan = row['Komisi Iklan'] - row['Spend']
+    warna_iklan = 'green' if profit_iklan >= 0 else 'red'
+    gaya[row.index.get_loc('Komisi Iklan')] = f'color: {warna_iklan}; font-weight: bold;'
+    
+    # 2. Warnai kolom Total Komisi (Nett) berdasarkan Profit keseluruhan
+    warna_total = 'green' if row['Profit'] >= 0 else 'red'
+    gaya[row.index.get_loc('Total Komisi (Nett)')] = f'color: {warna_total}; font-weight: bold;'
+    
+    # 3. Warnai kolom Profit keseluruhan
+    gaya[row.index.get_loc('Profit')] = f'color: {warna_total}; font-weight: bold;'
+    
+    return gaya
 
 # ==========================================
 # 3. AREA UPLOAD FILE DI BAGIAN ATAS
@@ -71,6 +86,9 @@ if len(uploaded_files) >= 3 and nama_laporan:
         df_sales['Clean_Tag'] = df_sales['Tag_link1'].apply(bersihkan_tag)
         df_clicks['Clean_Tag'] = df_clicks['Tag_link'].apply(bersihkan_tag)
 
+        # Kumpulan tag yang aktif di Meta Ads
+        ad_tags = set(df_meta[df_meta['Jumlah yang dibelanjakan (IDR)'] > 0]['Clean_Tag'].unique())
+
         # A. Mengolah Data Pengeluaran Iklan Meta
         meta_sum = df_meta.groupby('Clean_Tag').agg(
             Spend=('Jumlah yang dibelanjakan (IDR)', 'sum'),
@@ -87,43 +105,46 @@ if len(uploaded_files) >= 3 and nama_laporan:
             Komisi_Bersih=('Komisi Bersih Affiliate (Rp)', 'sum')
         ).reset_index()
 
-        # Penggabungan 3 Data Mentah Menjadi 1 Tabel Terintegrasi
+        # Penggabungan Data Detail untuk Hasil Bedah Data Rinci
         merged = pd.merge(meta_sum, click_sum, on='Clean_Tag', how='outer')
         merged = pd.merge(merged, sales_sum, on='Clean_Tag', how='outer').fillna(0)
 
-        # Klasifikasi Otomatis Trafik (IKLAN AKTIF vs ORGANIK)
-        ad_tags = set(df_meta['Clean_Tag'].unique())
         merged['Tipe'] = merged.apply(lambda r: "IKLAN (AKTIF)" if r['Clean_Tag'] in ad_tags and r['Spend'] > 0 else "ORGANIK", axis=1)
         
-        # Menghitung Rumus Kebocoran (Discrepancy Rate)
         merged['Kebocoran'] = merged.apply(
             lambda r: ((r['Klik_Meta'] - r['Klik_Shopee']) / r['Klik_Meta']) * 100 if r['Klik_Meta'] > 0 else 0.0, 
             axis=1
         )
 
-        # Menghitung Profit dan Nilai ROAS
         merged['Profit_Rugi'] = merged['Komisi_Bersih'] - merged['Spend']
         merged['ROAS'] = merged.apply(lambda r: r['Komisi_Bersih'] / r['Spend'] if r['Spend'] > 0 else 0.0, axis=1)
         
-        # Menyusun Susunan Kolom Data Sesuai Permintaan (Menyelipkan Kebocoran, Menghapus Komisi Bersih)
         merged = merged[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']]
         
-        # Hitung Nilai Akumulasi Total untuk Dashboard Utama depan
+        # --- PERHITUNGAN UNTUK RIWAYAT SUMMARY UTAMA ---
         total_spend = merged['Spend'].sum()
-        total_komisi = df_sales['Komisi Bersih Affiliate (Rp)'].sum() if 'Komisi Bersih Affiliate (Rp)' in df_sales.columns else merged['Komisi_Kotor'].sum()
-        total_profit = total_komisi - total_spend
+        total_komisi_kotor = merged['Komisi_Kotor'].sum()
+        
+        # Memisahkan Komisi Iklan vs Organik berdasarkan sumber tag
+        komisi_iklan_nett = merged[merged['Clean_Tag'].isin(ad_tags)]['Komisi_Kotor'].sum()
+        komisi_organik_nett = merged[~merged['Clean_Tag'].isin(ad_tags)]['Komisi_Kotor'].sum()
+        
+        # Total Komisi (Nett) = Gabungan komisi bersih affiliate (karena Shopee memotong sebagian untuk pajak/biaya)
+        total_komisi_nett = df_sales['Komisi Bersih Affiliate (Rp)'].sum() if 'Komisi Bersih Affiliate (Rp)' in df_sales.columns else total_komisi_kotor
+        total_profit = total_komisi_nett - total_spend
 
-        # Membuat baris rangkuman baru menggunakan tanggal pilihan user
+        # Membuat baris rangkuman baru
         new_summary = pd.DataFrame([{
             "Tanggal": tanggal_laporan, 
             "Nama Laporan": nama_laporan,
             "Spend": total_spend, 
-            "Komisi": total_komisi, 
-            "Profit": total_profit, 
-            "Status": "Sukses"
+            "Komisi Kotor": total_komisi_kotor,
+            "Komisi Iklan": komisi_iklan_nett,
+            "Komisi Organik": komisi_organik_nett,
+            "Total Komisi (Nett)": total_komisi_nett,
+            "Profit": total_profit
         }])
         
-        # Menyimpan ke memori internal halaman aplikasi
         if nama_laporan not in st.session_state['riwayat_summary']['Nama Laporan'].values:
             st.session_state['riwayat_summary'] = pd.concat([st.session_state['riwayat_summary'], new_summary], ignore_index=True)
             st.session_state['detail_laporan_data'][nama_laporan] = merged
@@ -171,7 +192,6 @@ if isinstance(rentang_tanggal, tuple) and len(rentang_tanggal) == 2:
 else:
     filter_start, filter_end = st.session_state['start_filter'], st.session_state['end_filter']
 
-# Filter data riwayat summary berdasarkan tanggal laporan yang diinput
 if not st.session_state['riwayat_summary'].empty:
     df_filtered = st.session_state['riwayat_summary'][
         (st.session_state['riwayat_summary']['Tanggal'] >= filter_start) & 
@@ -187,13 +207,13 @@ st.markdown("<br>", unsafe_allow_html=True)
 col_m1, col_m2, col_m3 = st.columns(3)
 
 val_spend = df_filtered['Spend'].sum() if not df_filtered.empty else 0
-val_komisi = df_filtered['Komisi'].sum() if not df_filtered.empty else 0
+val_komisi = df_filtered['Total Komisi (Nett)'].sum() if not df_filtered.empty else 0
 val_profit = df_filtered['Profit'].sum() if not df_filtered.empty else 0
 
 with col_m1:
     st.metric(label="💸 Total Pengeluaran Iklan", value=f"Rp {val_spend:,.0f}")
 with col_m2:
-    st.metric(label="💰 Total Komisi Masuk", value=f"Rp {val_komisi:,.0f}")
+    st.metric(label="💰 Total Komisi Masuk (Nett)", value=f"Rp {val_komisi:,.0f}")
 with col_m3:
     st.metric(label="📈 Keuntungan Bersih (Profit)", value=f"Rp {val_profit:,.0f}")
 
@@ -208,12 +228,15 @@ st.write("👉 **Silakan klik baris atau centang kotak** pada laporan di bawah u
 if df_filtered.empty:
     st.info("Belum ada laporan dalam rentang tanggal ini. Silakan unggah 3 file CSV Anda pada area upload di atas.")
 else:
-    # Menformat tampilan tabel Riwayat Utama dengan pewarnaan bersyarat pada kolom profit
+    # Memformat angka mata uang dan menyuntikkan aturan warna teks dinamis
     df_styled_summary = df_filtered.style.format({
         'Spend': 'Rp{:,.0f}',
-        'Komisi': 'Rp{:,.0f}',
+        'Komisi Kotor': 'Rp{:,.0f}',
+        'Komisi Iklan': 'Rp{:,.0f}',
+        'Komisi Organik': 'Rp{:,.0f}',
+        'Total Komisi (Nett)': 'Rp{:,.0f}',
         'Profit': 'Rp{:,.0f}'
-    }).map(warnai_profit, subset=['Profit'])
+    }).apply(gaya_tabel_summary, axis=1)
 
     event_pilih = st.dataframe(
         df_styled_summary, 
@@ -237,7 +260,6 @@ else:
         if nama_laporan_klik in st.session_state['detail_laporan_data']:
             df_detail_tampil = st.session_state['detail_laporan_data'][nama_laporan_klik]
             
-            # Format visual tabel rincian detail sesuai request terbaru
             st.dataframe(
                 df_detail_tampil.style.format({
                     'Spend': 'Rp{:,.0f}',
