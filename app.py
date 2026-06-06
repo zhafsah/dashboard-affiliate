@@ -25,8 +25,10 @@ if 'riwayat_summary' not in st.session_state:
     ])
 if 'detail_laporan_data' not in st.session_state:
     st.session_state['detail_laporan_data'] = {}
+if 'raw_sales_data' not in st.session_state:
+    st.session_state['raw_sales_data'] = {}
 
-# Fungsi pembantu untuk membersihkan tanda pagar (#) dan strip (----) pada nama iklan/tag
+# Fungsi pembantu untuk membersihkan nama iklan/tag
 def bersihkan_tag(x):
     if pd.isna(x) or str(x).strip() == "" or str(x).lower() == "nan":
         return "Organik"
@@ -38,14 +40,11 @@ def bersihkan_tag(x):
 # Fungsi pewarnaan bersyarat untuk baris tabel summary harian
 def gaya_tabel_summary(row):
     gaya = [''] * len(row)
-    
-    # Warnai kolom Komisi Iklan berdasarkan (Komisi Iklan - Spend)
     profit_iklan = row['Komisi Iklan'] - row['Spend']
     warna_iklan = 'green' if profit_iklan >= 0 else 'red'
     if 'Komisi Iklan' in row.index:
         gaya[row.index.get_loc('Komisi Iklan')] = f'color: {warna_iklan}; font-weight: bold;'
     
-    # Warnai kolom Total Komisi (Nett) dan Profit keseluruhan
     warna_total = 'green' if row['Profit'] >= 0 else 'red'
     if 'Total Komisi (Nett)' in row.index:
         gaya[row.index.get_loc('Total Komisi (Nett)')] = f'color: {warna_total}; font-weight: bold;'
@@ -54,38 +53,47 @@ def gaya_tabel_summary(row):
     
     return gaya
 
-# Fungsi pewarnaan kolom kebocoran pada tabel detail rinci
+# Fungsi pewarnaan kolom kebocoran & highlight baris iklan aktif pada tabel detail rinci
 def gaya_tabel_detail(row):
     gaya = [''] * len(row)
-    # Jika Klik Shopee > Klik Meta maka hijau, jika tidak maka merah
+    
+    # 1. Highlight warna background untuk Iklan Aktif agar beda dengan organik
+    if row['Tipe'] == "IKLAN (AKTIF)":
+        gaya = ['background-color: #f0f4f8; border-left: 4px solid #1f77b4;'] * len(row)
+        
+    # 2. Pewarnaan teks kolom kebocoran
     warna_kebocoran = 'green' if row['Klik_Shopee'] > row['Klik_Meta'] else 'red'
     if 'Kebocoran' in row.index:
-        gaya[row.index.get_loc('Kebocoran')] = f'color: {warna_kebocoran}; font-weight: bold;'
+        # Gabungkan gaya background dan warna teks khusus untuk kolom kebocoran
+        bg_style = 'background-color: #f0f4f8;' if row['Tipe'] == "IKLAN (AKTIF)" else ''
+        gaya[row.index.get_loc('Kebocoran')] = f'{bg_style} color: {warna_kebocoran}; font-weight: bold;'
+        
     return gaya
 
 # ==========================================
 # 3. AREA UPLOAD FILE DI BAGIAN ATAS
 # ==========================================
 with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
-    col_input1, col_input2, col_input3 = st.columns([1.5, 1.5, 3])
-    
-    with col_input2:
-        tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
-        tgl_obj = tanggal_laporan
-        nama_bulan = BULAN_INDO[tgl_obj.month]
-        default_nama = f"Laporan {tgl_obj.day:02d} {nama_bulan}"
+    # Menggunakan form agar inputan file uploader otomatis kosong/bersih kembali setelah submit
+    with st.form("form_upload", clear_on_submit=True):
+        col_input1, col_input2, col_input3 = st.columns([1.5, 1.5, 3])
         
-    with col_input1:
-        nama_laporan = st.text_input("Nama / Catatan Laporan:", value=default_nama)
+        with col_input2:
+            tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
+            tgl_obj = tanggal_laporan
+            nama_bulan = BULAN_INDO[tgl_obj.month]
+            default_nama = f"Laporan {tgl_obj.day:02d} {nama_bulan}"
+            
+        with col_input1:
+            nama_laporan = st.text_input("Nama / Catatan Laporan:", value=default_nama)
+            
+        with col_input3:
+            uploaded_files = st.file_uploader("Pilih berkas CSV iklan, klik, dan penjualan:", type=["csv"], accept_multiple_files=True)
         
-    with col_input3:
-        uploaded_files = st.file_uploader("Pilih berkas CSV iklan, klik, dan penjualan:", type=["csv"], accept_multiple_files=True)
-    
-    # Tombol eksekusi manual agar tidak langsung memproses otomatis
-    st.markdown("<br>", unsafe_allow_html=True)
-    tombol_proses = st.button("🚀 Proses & Bedah Laporan", type="primary", use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        tombol_proses = st.form_submit_button("🚀 Proses & Bedah Laporan", use_container_width=True)
 
-# Proses membaca file HANYA ketika tombol "Proses & Bedah Laporan" ditekan
+# Proses membaca file ketika tombol form ditekan
 if tombol_proses:
     if len(uploaded_files) < 3:
         st.error("Silakan unggah minimal 3 file CSV terlebih dahulu (File Meta Ads, Klik Shopee, dan Penjualan Shopee).")
@@ -104,7 +112,7 @@ if tombol_proses:
                     df_meta = df_temp
                 elif 'Klik ID' in df_temp.columns and 'Tag_link' in df_temp.columns:
                     df_clicks = df_temp
-                elif 'Total Komisi per Pesanan(Rp)' in df_temp.columns or 'Komisi Bersih Affiliate (Rp)' in df_temp.columns:
+                elif 'Total Komisi per Pesanan(Rp)' in df_temp.columns or 'Komisi Bersih Affiliate (Rp)' in df_temp.columns or 'Nama Produk' in df_temp.columns:
                     df_sales = df_temp
             except Exception as e:
                 st.error(f"Gagal membaca file {file.name}: {str(e)}")
@@ -176,7 +184,15 @@ if tombol_proses:
             if nama_laporan not in st.session_state['riwayat_summary']['Nama Laporan'].values:
                 st.session_state['riwayat_summary'] = pd.concat([st.session_state['riwayat_summary'], new_summary], ignore_index=True)
                 st.session_state['detail_laporan_data'][nama_laporan] = merged
-                st.success(f"✅ Laporan '{nama_laporan}' berhasil diproses dan disimpan! Silakan periksa tabel di bawah.")
+                
+                # Simpan data mentah sales untuk rincian produk nanti
+                st.session_state['raw_sales_data'][nama_laporan] = df_sales[[
+                    'Clean_Tag', 'Nama Produk', 'Kategori Kunci' if 'Kategori Kunci' in df_sales.columns else 'Kategori', 
+                    'Item Terjual' if 'Item Terjual' in df_sales.columns else 'Jumlah', 'Total Komisi per Pesanan(Rp)'
+                ]].copy()
+                
+                st.success(f"✅ Laporan '{nama_laporan}' berhasil diproses dan disimpan! Isian berkas otomatis dikosongkan.")
+                st.rerun()
             else:
                 st.warning("Nama laporan sudah ada. Harap gunakan nama laporan yang berbeda.")
         else:
@@ -274,9 +290,6 @@ else:
         selection_mode="single-row"
     )
 
-    # ------------------------------------------
-    # FITUR TOMBOL HAPUS LAPORAN
-    # ------------------------------------------
     if event_pilih and len(event_pilih["selection"]["rows"]) > 0:
         indeks_terpilih = event_pilih["selection"]["rows"][0]
         laporan_terpilih = df_filtered.iloc[indeks_terpilih]
@@ -289,6 +302,8 @@ else:
             
             if nama_laporan_klik in st.session_state['detail_laporan_data']:
                 del st.session_state['detail_laporan_data'][nama_laporan_klik]
+            if nama_laporan_klik in st.session_state['raw_sales_data']:
+                del st.session_state['raw_sales_data'][nama_laporan_klik]
                 
             st.toast(f"Laporan '{nama_laporan_klik}' berhasil dihapus!")
             st.rerun()
@@ -302,21 +317,29 @@ else:
         if nama_laporan_klik in st.session_state['detail_laporan_data']:
             df_detail_tampil = st.session_state['detail_laporan_data'][nama_laporan_klik]
             
-            # --- PERHITUNGAN AKUMULASI TOTAL KHUSUS IKLAN AKTIF ---
+            # Perhitungan Akumulasi Total Berurutan Sesuai Request Terbaru
             df_iklan_aktif = df_detail_tampil[df_detail_tampil['Tipe'] == "IKLAN (AKTIF)"]
-            total_klik_meta_iklan = df_iklan_aktif['Klik_Meta'].sum()
             total_spend_iklan = df_iklan_aktif['Spend'].sum()
+            total_klik_meta_iklan = df_iklan_aktif['Klik_Meta'].sum()
+            total_klik_shopee_iklan = df_iklan_aktif['Klik_Shopee'].sum()
             
-            # Menampilkan akumulasi total khusus Iklan Aktif di atas tabel
-            col_ad1, col_ad2 = st.columns(2)
+            # Hitung ROAS Gabungan Iklan Aktif
+            roas_iklan_gabungan = (df_iklan_aktif['Komisi_Kotor'].sum() / total_spend_iklan) if total_spend_iklan > 0 else 0.0
+            
+            # Tampilan Metrik Berurutan 
+            col_ad1, col_ad2, col_ad3, col_ad4 = st.columns(4)
             with col_ad1:
-                st.metric(label="🎯 Total Klik Meta (Khusus Iklan Aktif)", value=f"{total_klik_meta_iklan:,.0f} Klik")
+                st.metric(label="💳 Total Spend Iklan (Iklan Aktif)", value=f"Rp {total_spend_iklan:,.0f}")
             with col_ad2:
-                st.metric(label="💳 Total Spend Iklan (Khusus Iklan Aktif)", value=f"Rp {total_spend_iklan:,.0f}")
+                st.metric(label="🎯 Total Klik Meta (Iklan Aktif)", value=f"{total_klik_meta_iklan:,.0f} Klik")
+            with col_ad3:
+                st.metric(label="🛍️ Total Klik Shopee (Iklan Aktif)", value=f"{total_klik_shopee_iklan:,.0f} Klik")
+            with col_ad4:
+                st.metric(label="📊 ROAS (Iklan Aktif)", value=f"{roas_iklan_gabungan:,.2f}x")
             
-            st.write("Berikut detail perbandingan performa konversi klik, tingkat kebocoran data, omset komisi kotor, serta ROAS per video:")
+            st.write("💡 *Baris bertanda warna **abu-biru muda** merupakan video yang dipasangi **Iklan Aktif**. Silakan klik baris di bawah untuk membedah produk terjual:*")
 
-            # Memformat angka dan memberikan warna dinamis khusus di kolom Kebocoran
+            # Memformat tabel rincian dengan highlight baris khusus iklan aktif
             df_styled_detail = df_detail_tampil.style.format({
                 'Spend': 'Rp{:,.0f}',
                 'Komisi_Kotor': 'Rp{:,.0f}',
@@ -328,10 +351,51 @@ else:
                 'Kebocoran': '{:,.2f}%'
             }).apply(gaya_tabel_detail, axis=1)
             
-            st.dataframe(
+            event_klik_detail = st.dataframe(
                 df_styled_detail,
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row"
             )
+
+            # ==========================================
+            # 8. RINCIAN PRODUK TERJUAL (PASCA KLIK BARIS DETAIL)
+            # ==========================================
+            if event_klik_detail and len(event_klik_detail["selection"]["rows"]) > 0:
+                indeks_detail = event_klik_detail["selection"]["rows"][0]
+                tag_terpilih = df_detail_tampil.iloc[indeks_detail]["Clean_Tag"]
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.subheader(f"📦 Rincian Produk Terjual untuk Tag: #{tag_terpilih}")
+                
+                if nama_laporan_klik in st.session_state['raw_sales_data']:
+                    df_raw_sales = st.session_state['raw_sales_data'][nama_laporan_klik]
+                    
+                    # Filter data pesanan shopee berdasarkan tag kontent video yang sedang diklik
+                    df_produk_terfilter = df_raw_sales[df_raw_sales['Clean_Tag'] == tag_terpilih]
+                    
+                    if not df_produk_terfilter.empty:
+                        # Menyelaraskan nama kolom output
+                        kolom_kat = df_produk_terfilter.columns[2]
+                        kolom_qty = df_produk_terfilter.columns[3]
+                        
+                        df_produk_tampil = df_produk_terfilter.groupby(['Nama Produk', kolom_kat]).agg(
+                            Item_Terjual=(kolom_qty, 'sum'),
+                            Komisi_Diterima=('Total Komisi per Pesanan(Rp)', 'sum')
+                        ).reset_index()
+                        
+                        df_produk_tampil.columns = ['Nama Produk', 'Kategori', 'Item Terjual', 'Komisi']
+                        
+                        st.dataframe(
+                            df_produk_tampil.style.format({
+                                'Item Terjual': '{:,.0f}',
+                                'Komisi': 'Rp{:,.0f}'
+                            }),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                    else:
+                        st.info("Tidak ada rincian item produk yang tercatat khusus untuk tag ini.")
         else:
             st.error("Gagal menarik data detail dari memori sistem.")
