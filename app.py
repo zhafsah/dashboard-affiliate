@@ -26,7 +26,6 @@ def inisialisasi_gspread():
         "https://www.googleapis.com/auth/drive"
     ]
     try:
-        # Membaca teks JSON mentah langsung dari secrets tanpa pecah baris manual
         raw_json_teks = st.secrets["google_credentials"]["json_teks"]
         kredensial_dict = json.loads(raw_json_teks)
         creds = Credentials.from_service_account_info(kredensial_dict, scopes=scopes)
@@ -61,7 +60,7 @@ except:
 
 st.session_state['riwayat_summary'] = df_load_summary
 
-# Fungsi pembantu untuk membersihkan tag
+# Fungsi pembantu untuk membersihkan tag video/iklan
 def bersihkan_tag(x):
     if pd.isna(x) or str(x).strip() == "" or str(x).lower() == "nan":
         return "Organik"
@@ -94,10 +93,6 @@ def gaya_tabel_detail(row):
     gaya = [''] * len(row)
     if row['Tipe'] == "IKLAN (AKTIF)":
         gaya = ['background-color: #f0f4f8; border-left: 4px solid #1f77b4;'] * len(row)
-    warna_kebocoran = 'green' if row['Klik_Shopee'] > row['Klik_Meta'] else 'red'
-    if 'Kebocoran' in row.index:
-        bg_style = 'background-color: #f0f4f8;' if row['Tipe'] == "IKLAN (AKTIF)" else ''
-        gaya[row.index.get_loc('Kebocoran')] = f'{bg_style} color: {warna_kebocoran}; font-weight: bold;'
     return gaya
 
 # ==========================================
@@ -150,6 +145,39 @@ if tombol_proses:
             kolom_kategori_produk = cari_kolom(df_sales.columns, ['kategori kunci', 'kategori', 'category'], 'Kategori')
             kolom_jumlah_item = cari_kolom(df_sales.columns, ['item terjual', 'jumlah', 'quantity', 'qty'], 'Item Terjual')
 
+            # 🔥 FUNGSI BERSIHKAN ANGKA SAKTI INDONESIA (Anti Rp 90 desimal)
+            def bersihkan_angka_sakti(series):
+                def konversi_nilai(val):
+                    val = str(val).strip().replace('Rp', '').replace(' ', '').replace(' ', '')
+                    if not val or val.lower() == 'nan' or val == '-': 
+                        return 0.0
+                    if ',' in val and '.' in val:
+                        if val.find('.') < val.find(','): 
+                            val = val.replace('.', '').replace(',', '.')
+                        else: 
+                            val = val.replace(',', '')
+                    elif ',' in val:
+                        parts = val.split(',')
+                        if len(parts[-1]) == 3: val = val.replace(',', '')
+                        else: val = val.replace(',', '.')
+                    elif '.' in val:
+                        parts = val.split('.')
+                        if len(parts[-1]) == 3: val = val.replace('.', '')
+                    try:
+                        return float(val)
+                    except:
+                        return 0.0
+                return series.apply(konversi_nilai)
+
+            # Normalisasi data angka di awal sebelum pemrosesan
+            df_meta['Jumlah yang dibelanjakan (IDR)'] = bersihkan_angka_sakti(df_meta['Jumlah yang dibelanjakan (IDR)'])
+            if 'Klik tautan' in df_meta.columns:
+                df_meta['Klik tautan'] = bersihkan_angka_sakti(df_meta['Klik tautan']).fillna(0).astype(int)
+                
+            df_sales[kolom_komisi_kotor] = bersihkan_angka_sakti(df_sales[kolom_komisi_kotor])
+            df_sales[kolom_komisi_bersih] = bersihkan_angka_sakti(df_sales[kolom_komisi_bersih])
+            df_sales[kolom_jumlah_item] = bersihkan_angka_sakti(df_sales[kolom_jumlah_item]).fillna(1).astype(int)
+
             df_meta['Clean_Tag'] = df_meta['Nama iklan'].apply(bersihkan_tag)
             df_clicks['Clean_Tag'] = df_clicks['Tag_link'].apply(bersihkan_tag)
             df_sales['Clean_Tag'] = df_sales[kolom_tag_sales].apply(bersihkan_tag)
@@ -170,10 +198,9 @@ if tombol_proses:
             merged = merged[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']]
             
             total_spend = merged['Spend'].sum()
-            total_komisi_kotor = merged['Komisi_Kotor'].sum()
-            komisi_iklan_nett = merged[merged['Clean_Tag'].isin(ad_tags)]['Komisi_Kotor'].sum()
-            komisi_organik_nett = merged[~merged['Clean_Tag'].isin(ad_tags)]['Komisi_Kotor'].sum()
-            total_komisi_nett = df_sales[kolom_komisi_bersih].sum() if kolom_komisi_bersih in df_sales.columns else total_komisi_kotor
+            komisi_iklan_nett = merged[merged['Tipe'] == "IKLAN (AKTIF)"]["Komisi_Bersih"].sum()
+            komisi_organik_nett = merged[merged['Tipe'] == "ORGANIK"]["Komisi_Bersih"].sum()
+            total_komisi_nett = df_sales[kolom_komisi_bersih].sum()
             total_profit = total_komisi_nett - total_spend
 
             # 💾 EKSEKUSI SIMPAN PERMANEN KE GOOGLE SHEETS
@@ -192,8 +219,8 @@ if tombol_proses:
                         str(row['Clean_Tag']),
                         str(row[kolom_nama_produk]) if kolom_nama_produk in df_sales.columns else "Produk Tidak Diketahui",
                         str(row[kolom_kategori_produk]) if kolom_kategori_produk in df_sales.columns else "Umum",
-                        int(pd.to_numeric(row[kolom_jumlah_item], errors='coerce').fillna(1)),
-                        float(pd.to_numeric(row[kolom_komisi_kotor], errors='coerce').fillna(0))
+                        int(row[kolom_jumlah_item]),
+                        float(row[kolom_komisi_kotor])
                     ])
                 if rows_to_save:
                     worksheet_raw_sales.append_rows(rows_to_save)
@@ -294,6 +321,10 @@ else:
             if all_sales_records:
                 df_all_sales = pd.DataFrame(all_sales_records)
                 df_product_selected = df_all_sales[df_all_sales['Nama Laporan'] == nama_laporan_klik]
+                # Keamanan ekstra konversi data numerik dari Google Sheets
+                if not df_product_selected.empty:
+                    df_product_selected['Komisi'] = pd.to_numeric(df_product_selected['Komisi'], errors='coerce').fillna(0.0)
+                    df_product_selected['Item Terjual'] = pd.to_numeric(df_product_selected['Item Terjual'], errors='coerce').fillna(1).astype(int)
             else:
                 df_product_selected = pd.DataFrame()
         except:
@@ -318,23 +349,19 @@ else:
             
             df_iklan_aktif = df_detail_tampil[df_detail_tampil['Tipe'] == "IKLAN (AKTIF)"]
             total_spend_iklan = df_iklan_aktif['Spend'].sum()
-            total_klik_meta_iklan = df_iklan_aktif['Klik_Meta'].sum()
-            total_klik_shopee_iklan = df_iklan_aktif['Klik_Shopee'].sum()
             roas_iklan_gabungan = (df_iklan_aktif['Komisi_Kotor'].sum() / total_spend_iklan) if total_spend_iklan > 0 else 0.0
             
-            col_ad1, col_ad2, col_ad3, col_ad4 = st.columns(4)
-            with col_ad1: st.metric(label="💳 Total Spend Iklan (Iklan Active)", value=f"Rp {total_spend_iklan:,.0f}")
-            with col_ad2: st.metric(label="🎯 Total Klik Meta", value=f"{total_klik_meta_iklan:,.0f} Klik")
-            with col_ad3: st.metric(label="🛍️ Total Klik Shopee", value=f"{total_klik_shopee_iklan:,.0f} Klik")
-            with col_ad4: st.metric(label="📊 ROAS (Iklan Aktif)", value=f"{roas_iklan_gabungan:,.2f}x")
+            col_ad1, col_ad2 = st.columns(2)
+            with col_ad1: st.metric(label="💳 Total Spend Iklan", value=f"Rp {total_spend_iklan:,.0f}")
+            with col_ad2: st.metric(label="📊 ROAS Gabungan Iklan", value=f"{roas_iklan_gabungan:,.2f}x")
             
-            st.write("💡 *Baris bertanda warna **abu-biru muda** merupakan video yang dipasangi **Iklan Aktif**. Silakan klik baris di bawah untuk membedah produk terjual:*")
+            st.write("💡 *Klik baris di bawah untuk melihat rincian item barang spesifik yang terjual dari video tersebut:*")
 
             df_styled_detail = df_detail_tampil.style.format({'Spend': 'Rp{:,.0f}', 'Komisi_Kotor': 'Rp{:,.0f}', 'Profit_Rugi': 'Rp{:,.0f}', 'ROAS': '{:,.2f}x', 'Klik_Meta': '{:,.0f}', 'Klik_Shopee': '{:,.0f}', 'Pesanan': '{:,.0f}', 'Kebocoran': '{:,.2f}%'}).apply(gaya_tabel_detail, axis=1)
             event_klik_detail = st.dataframe(df_styled_detail, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
 
             # ==========================================
-            # 8. RINCIAN PRODUK TERJUAL (LOAD CLOUD)
+            # 8. RINCIAN PRODUK TERJUAL
             # ==========================================
             if event_klik_detail and len(event_klik_detail["selection"]["rows"]) > 0:
                 indeks_detail = event_klik_detail["selection"]["rows"][0]
