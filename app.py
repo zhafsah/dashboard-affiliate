@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import gspread
 from google.oauth2.service_account import Credentials
 import json
+import io
 
 # ==========================================
 # 1. PENGATURAN HALAMAN & KONEKSI GOOGLE SHEETS
@@ -43,19 +44,35 @@ except Exception as e:
     st.error(f"❌ Gagal tersambung ke Google Sheets. Periksa konfigurasi Secrets Anda. Error: {str(e)}")
     st.stop()
 
+# Membuat tab otomatis jika belum ada di Google Sheets
+def dapatkan_atau_buat_worksheet(nama_sheet, headers):
+    try:
+        return sheet_utama.worksheet(nama_sheet)
+    except:
+        ws = sheet_utama.add_worksheet(title=nama_sheet, rows="2000", cols=str(len(headers) + 2))
+        ws.append_row(headers)
+        return ws
+
+worksheet_summary = dapatkan_atau_buat_worksheet("Riwayat_Summary", ["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
+worksheet_tag = dapatkan_atau_buat_worksheet("Riwayat_Tag", ["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
+worksheet_raw_sales = dapatkan_atau_buat_worksheet("Raw_Sales", ["Nama Laporan", "Clean_Tag", "Nama Produk", "Kategori", "Item Terjual", "Komisi"])
+
 # ==========================================
 # 2. LOAD DATA DARI GOOGLE SHEETS KE SYSTEM
 # ==========================================
 try:
-    worksheet_summary = sheet_utama.worksheet("Riwayat_Summary")
     records_summary = worksheet_summary.get_all_records()
     if records_summary:
         df_load_summary = pd.DataFrame(records_summary)
-        df_load_summary['Tanggal'] = pd.to_datetime(df_load_summary['Tanggal']).dt.date
+        df_load_summary['Tanggal'] = pd.to_datetime(df_load_summary['Tanggal'], errors='coerce').dt.date
+        # Pastikan tipe data numeric aman saat dibaca dari Cloud
+        for col in ["Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"]:
+            if col in df_load_summary.columns:
+                df_load_summary[col] = pd.to_numeric(df_load_summary[col], errors='coerce').fillna(0.0)
     else:
         df_load_summary = pd.DataFrame(columns=["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
-except:
-    st.error("Tab 'Riwayat_Summary' tidak ditemukan di Google Sheets Anda.")
+except Exception as e:
+    st.error(f"Gagal memuat database internal: {str(e)}")
     st.stop()
 
 st.session_state['riwayat_summary'] = df_load_summary
@@ -69,21 +86,39 @@ def bersihkan_tag(x):
     if s.endswith('----'): s = s[:-4]
     return s
 
-# 🔥 Fungsi Pencarian Kolom Cerdas Dua Tahap (Anti-Gagal Gara-gara Kapitalisasi/Spasi)
+# Fungsi Pencarian Kolom Cerdas & Sensitif
 def cari_kolom(list_kolom, kata_kunci_list, default_name):
-    # Tahap 1: Cari yang sama persis secara huruf kecil
     for col in list_kolom:
         c = str(col).strip().lower()
         for kw in kata_kunci_list:
             if kw.lower() == c:
                 return col
-    # Tahap 2: Cari potongan kata kunci (Substring)
     for col in list_kolom:
         c = str(col).strip().lower()
         for kw in kata_kunci_list:
             if kw.lower() in c:
                 return col
     return default_name
+
+# 🔥 Fungsi Cerdas Pembaca CSV: Anti-Karakter Rusak & Kebal Salah Pembatas Kolom
+def baca_csv_sakti(file):
+    raw_bytes = file.read()
+    file.seek(0)
+    # Gunakan utf-8-sig untuk membuang penanda BOM \ufeff bawaan Shopee secara paksa
+    try: teks = raw_bytes.decode('utf-8-sig')
+    except: teks = raw_bytes.decode('latin-1')
+    
+    baris_pertama = teks.split('\n')[0] if '\n' in teks else ""
+    if ';' in baris_pertama and baris_pertama.count(';') > baris_pertama.count(','):
+        sep = ';'
+    elif '\t' in baris_pertama:
+        sep = '\t'
+    else:
+        sep = ','
+        
+    df = pd.read_csv(io.StringIO(teks), sep=sep)
+    df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", "")
+    return df
 
 def gaya_tabel_summary(row):
     gaya = [''] * len(row)
@@ -92,16 +127,15 @@ def gaya_tabel_summary(row):
         warna_iklan = 'green' if profit_iklan >= 0 else 'red'
         gaya[row.index.get_loc('Komisi Iklan')] = f'color: {warna_iklan}; font-weight: bold;'
     
-    warna_total = 'green' if row['Profit'] >= 0 else 'red'
-    if 'Total Komisi (Nett)' in row.index:
-        gaya[row.index.get_loc('Total Komisi (Nett)')] = f'color: {warna_total}; font-weight: bold;'
     if 'Profit' in row.index:
+        warna_total = 'green' if row['Profit'] >= 0 else 'red'
+        gaya[row.index.get_loc('Total Komisi (Nett)')] = f'color: {warna_total}; font-weight: bold;'
         gaya[row.index.get_loc('Profit')] = f'color: {warna_total}; font-weight: bold;'
     return gaya
 
 def gaya_tabel_detail(row):
     gaya = [''] * len(row)
-    if row['Tipe'] == "IKLAN (AKTIF)":
+    if 'Tipe' in row.index and row['Tipe'] == "IKLAN (AKTIF)":
         gaya = ['background-color: #f0f4f8; border-left: 4px solid #1f77b4;'] * len(row)
     return gaya
 
@@ -127,46 +161,37 @@ if tombol_proses:
     if len(uploaded_files) < 3:
         st.error("Silakan unggah minimal 3 file CSV terlebih dahulu.")
     elif nama_laporan in st.session_state['riwayat_summary']['Nama Laporan'].values:
-        st.warning("⚠️ Nama laporan sudah ada di Google Sheets. Gunakan nama lain atau hapus laporan lama terlebih dahulu.")
+        st.warning("⚠️ Nama laporan sudah ada di Google Sheets. Silakan hapus laporan lama terlebih dahulu.")
     else:
         df_meta, df_clicks, df_sales = None, None, None
         for file in uploaded_files:
-            try:
-                try: df_temp = pd.read_csv(file, encoding='utf-8')
-                except: df_temp = pd.read_csv(file, encoding='latin-1')
-                
+            df_temp = baca_csv_sakti(file)
+            if df_temp is not None:
                 if 'Jumlah yang dibelanjakan (IDR)' in df_temp.columns or 'Nama iklan' in df_temp.columns:
                     df_meta = df_temp
                 elif 'Klik ID' in df_temp.columns and 'Tag_link' in df_temp.columns:
                     df_clicks = df_temp
-                elif 'Total Komisi per Pesanan(Rp)' in df_temp.columns or 'Komisi Bersih Affiliate (Rp)' in df_temp.columns or 'Nama Produk' in df_temp.columns or 'Product Name' in df_temp.columns:
+                elif any(k dalam str(df_temp.columns).lower() for k in ['komisi per pesanan', 'komisi bersih', 'nama produk', 'product name', 'info produk']):
                     df_sales = df_temp
-            except Exception as e:
-                st.error(f"Gagal membaca file {file.name}: {str(e)}")
 
         if df_meta is not None and df_clicks is not None and df_sales is not None:
-            df_sales.columns = df_sales.columns.str.strip()
-            
-            # Perluasan Kamus Kata Kunci (Super-Agresif terhadap format Shopee Indonesia)
-            kolom_pesanan = cari_kolom(df_sales.columns, ['id pesanan', 'id pemesanan', 'order id', 'no pesanan'], df_sales.columns[0])
-            kolom_tag_sales = cari_kolom(df_sales.columns, ['tag_link1', 'tag link', 'sub id', 'tag_link'], 'Tag_link1')
+            # Perluasan Logika Deteksi Kata Kunci
+            kolom_pesanan = cari_kolom(df_sales.columns, ['id pesanan', 'order id', 'no pesanan', 'no. pesanan', 'id pemesanan'], df_sales.columns[0])
+            kolom_tag_sales = cari_kolom(df_sales.columns, ['tag_link1', 'tag link', 'sub id', 'tag_link', 'tag'], 'Tag_link1')
             kolom_komisi_kotor = cari_kolom(df_sales.columns, ['total komisi per pesanan', 'komisi kotor', 'gross commission'], df_sales.columns[-1])
             kolom_komisi_bersih = cari_kolom(df_sales.columns, ['komisi bersih affiliate', 'komisi bersih', 'net commission', 'nett commission'], kolom_komisi_kotor)
-            kolom_nama_produk = cari_kolom(df_sales.columns, ['nama produk', 'product name', 'info produk', 'judul produk', 'item name', 'produk', 'product'], 'Nama Produk')
+            kolom_nama_produk = cari_kolom(df_sales.columns, ['nama produk', 'product name', 'info produk', 'judul', 'item', 'nama barang', 'product'], 'Nama Produk')
             kolom_kategori_produk = cari_kolom(df_sales.columns, ['kategori kunci', 'kategori', 'category', 'kategori produk'], 'Kategori')
-            kolom_jumlah_item = cari_kolom(df_sales.columns, ['item terjual', 'jumlah', 'quantity', 'qty'], 'Item Terjual')
+            kolom_jumlah_item = cari_kolom(df_sales.columns, ['item terjual', 'jumlah', 'quantity', 'qty', 'jumlah produk'], 'Item Terjual')
 
-            # Fungsi Pembersih Angka Format Indonesia
+            # Pembersih Format Angka Rupiah
             def bersihkan_angka_sakti(series):
                 def konversi_nilai(val):
                     val = str(val).strip().replace('Rp', '').replace(' ', '').replace(' ', '')
-                    if not val or val.lower() == 'nan' or val == '-': 
-                        return 0.0
+                    if not val or val.lower() == 'nan' or val == '-': return 0.0
                     if ',' in val and '.' in val:
-                        if val.find('.') < val.find(','): 
-                            val = val.replace('.', '').replace(',', '.')
-                        else: 
-                            val = val.replace(',', '')
+                        if val.find('.') < val.find(','): val = val.replace('.', '').replace(',', '.')
+                        else: val = val.replace(',', '')
                     elif ',' in val:
                         parts = val.split(',')
                         if len(parts[-1]) == 3: val = val.replace(',', '')
@@ -174,13 +199,10 @@ if tombol_proses:
                     elif '.' in val:
                         parts = val.split('.')
                         if len(parts[-1]) == 3: val = val.replace('.', '')
-                    try:
-                        return float(val)
-                    except:
-                        return 0.0
+                    try: return float(val)
+                    except: return 0.0
                 return series.apply(konversi_nilai)
 
-            # Normalisasi data angka awal sebelum pemrosesan
             df_meta['Jumlah yang dibelanjakan (IDR)'] = bersihkan_angka_sakti(df_meta['Jumlah yang dibelanjakan (IDR)'])
             if 'Klik tautan' in df_meta.columns:
                 df_meta['Klik tautan'] = bersihkan_angka_sakti(df_meta['Klik tautan']).fillna(0).astype(int)
@@ -207,64 +229,41 @@ if tombol_proses:
             merged['Profit_Rugi'] = merged['Komisi_Bersih'] - merged['Spend']
             merged['ROAS'] = merged.apply(lambda r: r['Komisi_Bersih'] / r['Spend'] if r['Spend'] > 0 else 0.0, axis=1)
             
-            # Hitung total kalkulasi ringkasan utama
             total_spend = merged['Spend'].sum()
             komisi_iklan_nett = merged[merged['Tipe'] == "IKLAN (AKTIF)"]["Komisi_Bersih"].sum()
             komisi_organik_nett = merged[merged['Tipe'] == "ORGANIK"]["Komisi_Bersih"].sum()
             total_komisi_nett = df_sales[kolom_komisi_bersih].sum()
             total_profit = total_komisi_nett - total_spend
 
-            # 💾 EKSEKUSI SIMPAN PERMANEN KE GOOGLE SHEETS
             try:
-                # 1. Simpan Ringkasan Utama
-                worksheet_summary.append_row([
-                    str(tanggal_laporan), nama_laporan, float(total_spend), 
-                    float(komisi_iklan_nett), float(komisi_organik_nett), 
-                    float(total_komisi_nett), float(total_profit)
-                ])
+                # 1. Simpan Utama
+                worksheet_summary.append_row([str(tanggal_laporan), nama_laporan, float(total_spend), float(komisi_iklan_nett), float(komisi_organik_nett), float(total_komisi_nett), float(total_profit)])
                 
-                # 2. Simpan Detail Per Tag (Agar data spend per tag terkunci sempurna)
-                try:
-                    worksheet_tag = sheet_utama.worksheet("Riwayat_Tag")
-                except:
-                    worksheet_tag = sheet_utama.add_worksheet(title="Riwayat_Tag", rows="1000", cols="12")
-                    worksheet_tag.append_row(["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
-                
+                # 2. Simpan Per Tag
                 rows_tag_to_save = []
                 for _, row in merged.iterrows():
-                    rows_tag_to_save.append([
-                        nama_laporan, str(row['Tipe']), str(row['Clean_Tag']), 
-                        float(row['Spend']), int(row['Klik_Meta']), int(row['Klik_Shopee']), 
-                        int(row['Pesanan']), float(row['Kebocoran']), float(row['Komisi_Kotor']), 
-                        float(row['Komisi_Bersih']), float(row['Profit_Rugi']), float(row['ROAS'])
-                    ])
-                if rows_tag_to_save:
-                    worksheet_tag.append_rows(rows_tag_to_save)
+                    rows_tag_to_save.append([nama_laporan, str(row['Tipe']), str(row['Clean_Tag']), float(row['Spend']), int(row['Klik_Meta']), int(row['Klik_Shopee']), int(row['Pesanan']), float(row['Kebocoran']), float(row['Komisi_Kotor']), float(row['Komisi_Bersih']), float(row['Profit_Rugi']), float(row['ROAS'])])
+                if rows_tag_to_save: worksheet_tag.append_rows(rows_tag_to_save)
                 
-                # 3. Simpan Detail Item Pen penjualan
-                worksheet_raw_sales = sheet_utama.worksheet("Raw_Sales")
+                # 3. Simpan Item Penjualan Raw
                 rows_to_save = []
                 for _, row in df_sales.iterrows():
-                    rows_to_save.append([
-                        nama_laporan,
-                        str(row['Clean_Tag']),
-                        str(row[kolom_nama_produk]) if kolom_nama_produk in df_sales.columns else "Produk Tidak Diketahui",
-                        str(row[kolom_kategori_produk]) if kolom_kategori_produk in df_sales.columns else "Umum",
-                        int(row[kolom_jumlah_item]),
-                        float(row[kolom_komisi_bersih]) # Menggunakan Komisi Bersih (Nett)
-                    ])
-                if rows_to_save:
-                    worksheet_raw_sales.append_rows(rows_to_save)
+                    nama_prod_val = str(row[kolom_nama_produk]).strip() if kolom_nama_produk in df_sales.columns else "Produk Tidak Diketahui"
+                    kat_prod_val = str(row[kolom_kategori_produk]).strip() if kolom_kategori_produk in df_sales.columns else "Umum"
+                    rows_to_save.append([nama_laporan, str(row['Clean_Tag']), nama_prod_val, kat_prod_val, int(row[kolom_jumlah_item]), float(row[kolom_komisi_bersih])])
+                if rows_to_save: worksheet_raw_sales.append_rows(rows_to_save)
                 
-                st.success(f"✅ Data '{nama_laporan}' Berhasil Tersimpan Permanen di Google Sheets!")
+                st.success(f"✅ Data '{nama_laporan}' Sukses Terkunci!")
                 st.rerun()
             except Exception as sheet_err:
                 st.error(f"Gagal menulis data ke Google Sheets: {str(sheet_err)}")
+        else:
+            st.error("Gagal mendeteksi kecocokan struktur file. Pastikan Anda mengunggah 3 file yang benar.")
 
 st.markdown("---")
 
 # ==========================================
-# 4. FILTER KALENDER & SHORTCUTS WAKTU
+# 4. FILTER RENTANG WAKTU DATA
 # ==========================================
 st.subheader("🔍 Filter Rentang Waktu Data")
 col_btn1, col_btn2, col_btn3, col_date = st.columns([1, 1, 1, 3])
@@ -297,24 +296,24 @@ if not df_filtered.empty:
     df_filtered = df_filtered[(df_filtered['Tanggal'] >= filter_start) & (df_filtered['Tanggal'] <= filter_end)]
 
 # ==========================================
-# 5. KOTAK METRIK RINGKASAN DATA (KPI CARDS)
+# 5. KOTAK METRIK SUMMARY (KPI)
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
 col_m1, col_m2, col_m3 = st.columns(3)
-val_spend = df_filtered['Spend'].sum() if not df_filtered.empty else 0
-val_komisi = df_filtered['Total Komisi (Nett)'].sum() if not df_filtered.empty else 0
-val_profit = df_filtered['Profit'].sum() if not df_filtered.empty else 0
+val_spend = pd.to_numeric(df_filtered['Spend'], errors='coerce').sum() if not df_filtered.empty else 0
+val_komisi = pd.to_numeric(df_filtered['Total Komisi (Nett)'], errors='coerce').sum() if not df_filtered.empty else 0
+val_profit = pd.to_numeric(df_filtered['Profit'], errors='coerce').sum() if not df_filtered.empty else 0
 
 with col_m1: st.metric(label="💸 Total Pengeluaran Iklan", value=f"Rp {val_spend:,.0f}")
 with col_m2: st.metric(label="💰 Total Komisi Masuk (Nett)", value=f"Rp {val_komisi:,.0f}")
 with col_m3: st.metric(label="📈 Keuntungan Bersih (Profit)", value=f"Rp {val_profit:,.0f}")
 
 # ==========================================
-# 6. TABEL RIWAYAT UTAMA & DETEKSI KLIK BARIS
+# 6. TABEL UTAMA & ACTION HAPUS DATA
 # ==========================================
 st.subheader("📋 Riwayat Laporan Harian")
 if df_filtered.empty:
-    st.info("Belum ada laporan dalam rentang tanggal ini.")
+    st.info("Belum ada data terekam.")
 else:
     df_styled_summary = df_filtered.style.format({'Spend': 'Rp{:,.0f}', 'Komisi Iklan': 'Rp{:,.0f}', 'Komisi Organik': 'Rp{:,.0f}', 'Total Komisi (Nett)': 'Rp{:,.0f}', 'Profit': 'Rp{:,.0f}'}).apply(gaya_tabel_summary, axis=1)
     event_pilih = st.dataframe(df_styled_summary, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
@@ -329,65 +328,56 @@ else:
                 cell = worksheet_summary.find(nama_laporan_klik)
                 worksheet_summary.delete_rows(cell.row)
                 
-                worksheet_raw_sales = sheet_utama.worksheet("Raw_Sales")
-                cells = worksheet_raw_sales.findall(nama_laporan_klik)
-                rows_to_del = sorted(list(set([c.row for c in cells])), reverse=True)
-                for r in rows_to_del:
-                    worksheet_raw_sales.delete_rows(r)
+                cells_raw = worksheet_raw_sales.findall(nama_laporan_klik)
+                for r in sorted(list(set([c.row for c in cells_raw])), reverse=True): worksheet_raw_sales.delete_rows(r)
                 
-                try:
-                    worksheet_tag = sheet_utama.worksheet("Riwayat_Tag")
-                    cells_tag = worksheet_tag.findall(nama_laporan_klik)
-                    rows_tag_del = sorted(list(set([c.row for c in cells_tag])), reverse=True)
-                    for r in rows_tag_del:
-                        worksheet_tag.delete_rows(r)
-                except: pass
+                cells_tag = worksheet_tag.findall(nama_laporan_klik)
+                for r in sorted(list(set([c.row for c in cells_tag])), reverse=True): worksheet_tag.delete_rows(r)
                     
-                st.toast(f"Laporan '{nama_laporan_klik}' sukses dihapus dari Cloud Drive!")
+                st.toast("Sukses menghapus data lama!")
                 st.rerun()
             except Exception as del_e:
-                st.error(f"Gagal menghapus data di Google Sheets: {str(del_e)}")
+                st.error(f"Gagal menghapus: {str(del_e)}")
 
         # ==========================================
-        # 7. GENERATE DETAIL DETEKSI DARI TAB RIWAYAT_TAG
+        # 7. HASIL BEDAH DATA DETIL PER VIDEO (TAG)
         # ==========================================
         st.markdown("---")
         st.subheader(f"🔍 Hasil Bedah Data Rinci: {nama_laporan_klik}")
         
         try:
-            worksheet_tag = sheet_utama.worksheet("Riwayat_Tag")
             all_tag_records = worksheet_tag.get_all_records()
-            if all_tag_records:
-                df_all_tags = pd.DataFrame(all_tag_records)
-                df_detail_tampil = df_all_tags[df_all_tags['Nama Laporan'] == nama_laporan_klik]
-            else:
-                df_detail_tampil = pd.DataFrame()
+            df_detail_tampil = pd.DataFrame(all_tag_records) if all_tag_records else pd.DataFrame()
+            if not df_detail_tampil.empty:
+                df_detail_tampil = df_detail_tampil[df_detail_tampil['Nama Laporan'] == nama_laporan_klik]
         except:
             df_detail_tampil = pd.DataFrame()
 
         if not df_detail_tampil.empty:
+            # Paksa konversi tipe data numerik agar kalkulasi detail presisi
+            for col in ['Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Komisi_Bersih', 'Profit_Rugi', 'ROAS']:
+                if col in df_detail_tampil.columns:
+                    df_detail_tampil[col] = pd.to_numeric(df_detail_tampil[col], errors='coerce').fillna(0.0)
+
             df_iklan_aktif = df_detail_tampil[df_detail_tampil['Tipe'] == "IKLAN (AKTIF)"]
             total_spend_iklan = df_iklan_aktif['Spend'].sum()
             roas_iklan_gabungan = (df_iklan_aktif['Komisi_Bersih'].sum() / total_spend_iklan) if total_spend_iklan > 0 else 0.0
             
             col_ad1, col_ad2 = st.columns(2)
-            with col_ad1: st.metric(label="💳 Total Spend Iklan", value=f"Rp {total_spend_iklan:,.0f}")
+            with col_ad1: st.metric(label="💳 Total Spend Iklan Video", value=f"Rp {total_spend_iklan:,.0f}")
             with col_ad2: st.metric(label="📊 ROAS Gabungan Iklan (Nett)", value=f"{roas_iklan_gabungan:,.2f}x")
             
-            st.write("💡 *Klik baris di bawah untuk melihat rincian item barang spesifik yang terjual dari video tersebut:*")
+            st.write("💡 *Klik salah satu baris di bawah ini untuk mengurai item produk spesifiknya:*")
 
-            # Format data pengeluaran asli per baris video
-            df_detail_tampil.columns = df_detail_tampil.columns.str.strip()
-            df_styled_detail = df_detail_tampil[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']].style.format({
-                'Spend': 'Rp{:,.0f}', 'Komisi_Kotor': 'Rp{:,.0f}', 'Profit_Rugi': 'Rp{:,.0f}', 
-                'ROAS': '{:,.2f}x', 'Klik_Meta': '{:,.0f}', 'Klik_Shopee': '{:,.0f}', 
-                'Pesanan': '{:,.0f}', 'Kebocoran': '{:,.2f}%'
+            df_styled_detail = df_detail_tampil[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Komisi_Bersih', 'Profit_Rugi', 'ROAS']].style.format({
+                'Spend': 'Rp{:,.0f}', 'Komisi_Kotor': 'Rp{:,.0f}', 'Komisi_Bersih': 'Rp{:,.0f}', 'Profit_Rugi': 'Rp{:,.0f}', 
+                'ROAS': '{:,.2f}x', 'Klik_Meta': '{:,.0f}', 'Klik_Shopee': '{:,.0f}', 'Pesanan': '{:,.0f}', 'Kebocoran': '{:,.2f}%'
             }).apply(gaya_tabel_detail, axis=1)
             
             event_klik_detail = st.dataframe(df_styled_detail, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
 
             # ==========================================
-            # 8. RINCIAN PRODUK TERJUAL
+            # 8. RINCIAN ITEM PRODUK YANG TERJUAL
             # ==========================================
             if event_klik_detail and len(event_klik_detail["selection"]["rows"]) > 0:
                 indeks_detail = event_klik_detail["selection"]["rows"][0]
@@ -397,7 +387,6 @@ else:
                 st.subheader(f"📦 Rincian Produk Terjual untuk Tag: #{tag_terpilih}")
                 
                 try:
-                    worksheet_raw_sales = sheet_utama.worksheet("Raw_Sales")
                     all_sales_records = worksheet_raw_sales.get_all_records()
                     df_all_sales = pd.DataFrame(all_sales_records) if all_sales_records else pd.DataFrame()
                 except:
@@ -407,7 +396,6 @@ else:
                     df_product_selected = df_all_sales[(df_all_sales['Nama Laporan'] == nama_laporan_klik) & (df_all_sales['Clean_Tag'] == tag_terpilih)]
                     
                     if not df_product_selected.empty:
-                        # Sinkronisasi nama kolom dinamis dari Google Sheets ke memori Pandas
                         kolom_nama_sh = cari_kolom(df_product_selected.columns, ['nama produk', 'product', 'nama'], 'Nama Produk')
                         kolom_kat_sh = cari_kolom(df_product_selected.columns, ['kategori', 'category'], 'Kategori')
                         kolom_item_sh = cari_kolom(df_product_selected.columns, ['item terjual', 'jumlah', 'quantity', 'qty'], 'Item Terjual')
@@ -424,4 +412,4 @@ else:
                         df_produk_tampil.columns = ['Nama Produk', 'Kategori', 'Item Terjual', 'Komisi Bersih']
                         st.dataframe(df_produk_tampil.style.format({'Item Terjual': '{:,.0f}', 'Komisi Bersih': 'Rp{:,.0f}'}), use_container_width=True, hide_index=True)
                     else:
-                        st.info("Tidak ada rincian item produk yang tercatat khusus untuk tag ini.")
+                        st.info("Tidak ada rincian item produk khusus untuk tag ini.")
