@@ -79,6 +79,7 @@ def gaya_tabel_detail(row):
 # 3. AREA UPLOAD FILE DI BAGIAN ATAS
 # ==========================================
 with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
+    # Menggunakan form agar inputan file uploader otomatis kosong/bersih kembali setelah submit
     with st.form("form_upload", clear_on_submit=True):
         col_input1, col_input2, col_input3 = st.columns([1.5, 1.5, 3])
         
