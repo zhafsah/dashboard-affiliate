@@ -224,6 +224,20 @@ else:
         if nama_laporan_klik in st.session_state['detail_laporan_data']:
             df_detail_tampil = st.session_state['detail_laporan_data'][nama_laporan_klik]
             
-            # Format visual tabel detail operasional sesuai dengan struktur tabel referensi
+            # Format visual tabel detail operasional
             st.dataframe(
                 df_detail_tampil.style.format({
+                    'Spend': 'Rp{:,.0f}',
+                    'Komisi_Kotor': 'Rp{:,.0f}',
+                    'Komisi_Bersih': 'Rp{:,.0f}',
+                    'Profit_Rugi': 'Rp{:,.0f}',
+                    'ROAS': '{:,.2f}x',
+                    'Klik_Meta': '{:,.0f}',
+                    'Klik_Shopee': '{:,.0f}',
+                    'Pesanan': '{:,.0f}'
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.error("Gagal menarik data detail dari memori sistem.")
