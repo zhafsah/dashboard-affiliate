@@ -95,9 +95,7 @@ with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekali
             
         with col_input3:
             uploaded_files = st.file_uploader("Pilih berkas CSV iklan, klik, dan penjualan:", type=["csv"], accept_multiple_files=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-    
+            
     # Tombol eksekusi manual agar tidak langsung memproses otomatis
     st.markdown("<br>", unsafe_allow_html=True)
     tombol_proses = st.button("🚀 Proses & Bedah Laporan", type="primary", use_container_width=True)
