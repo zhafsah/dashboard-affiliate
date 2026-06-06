@@ -176,7 +176,7 @@ else:
 # ==========================================
 # 5. KOTAK METRIK RINGKASAN DATA (KPI CARDS)
 # ==========================================
-st.markdown("<br>", unsafe_allow_index=True)
+st.markdown("<br>", unsafe_allow_html=True)
 col_m1, col_m2, col_m3 = st.columns(3)
 
 val_spend = df_filtered['Spend'].sum() if not df_filtered.empty else 0
@@ -190,7 +190,7 @@ with col_m2:
 with col_m3:
     st.metric(label="📈 Keuntungan Bersih (Profit)", value=f"Rp {val_profit:,.0f}")
 
-st.markdown("<br>", unsafe_allow_index=True)
+st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
 # 6. TABEL RIWAYAT UTAMA & DETEKSI KLIK BARIS
@@ -227,17 +227,3 @@ else:
             # Format visual tabel detail operasional sesuai dengan struktur tabel referensi
             st.dataframe(
                 df_detail_tampil.style.format({
-                    'Spend': 'Rp{:,.0f}',
-                    'Komisi_Kotor': 'Rp{:,.0f}',
-                    'Komisi_Bersih': 'Rp{:,.0f}',
-                    'Profit_Rugi': 'Rp{:,.0f}',
-                    'ROAS': '{:,.2f}x',
-                    'Klik_Meta': '{:,.0f}',
-                    'Klik_Shopee': '{:,.0f}',
-                    'Pesanan': '{:,.0f}'
-                }),
-                use_container_width=True,
-                hide_index=True
-            )
-        else:
-            st.error("Gagal menarik data detail dari memori sistem.")
