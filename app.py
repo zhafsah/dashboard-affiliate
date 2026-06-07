@@ -7,6 +7,55 @@ import json
 import io
 
 # ==========================================
+# 0. FUNGSI GLOBAL PEMBERSIH ANGKA (BULLETPROOF)
+# ==========================================
+def bersihkan_angka_sakti(series):
+    def konversi_nilai(val):
+        if pd.isna(val):
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        
+        # Bersihkan spasi dan simbol mata uang
+        s = str(val).strip().replace('Rp', '').replace(' ', '')
+        if not s or s.lower() in ['nan', '-', 'null']:
+            return 0.0
+        
+        # Percobaan 1: Coba konversi langsung (Aman untuk format float standar '150000.0' atau '0.123')
+        try:
+            return float(s)
+        except ValueError:
+            pass
+        
+        # Percobaan 2: Penanganan jika gagal karena campuran tanda baca (ribuan/desimal)
+        if ',' in s and '.' in s:
+            if s.find('.') < s.find(','):
+                # Format Indonesia: 1.500.000,00 -> Hapus titik, ubah koma jadi titik
+                s = s.replace('.', '').replace(',', '.')
+            else:
+                # Format US: 1,500,000.00 -> Hapus koma
+                s = s.replace(',', '')
+        elif ',' in s:
+            parts = s.split(',')
+            if len(parts[-1]) == 3 and len(parts) > 1:
+                # Kemungkinan pemisah ribuan: 1,500 -> 1500
+                s = s.replace(',', '')
+            else:
+                # Kemungkinan desimal: 5,50 -> 5.50
+                s = s.replace(',', '.')
+        elif '.' in s:
+            # Jika lolos ke sini berarti gagal di float awal, kemungkinan multi-titik ribuan: 1.500.000
+            s = s.replace('.', '')
+            
+        try:
+            return float(s)
+        except:
+            return 0.0
+            
+    return series.apply(konversi_nilai)
+
+
+# ==========================================
 # 1. PENGATURAN HALAMAN & KONEKSI GOOGLE SHEETS
 # ==========================================
 st.set_page_config(page_title="Affiliate Advanced Analytics", layout="wide")
@@ -19,7 +68,6 @@ BULAN_INDO = {
     7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"
 }
 
-# Fungsi menghubungkan ke Google Sheets menggunakan trik Raw JSON Secrets
 @st.cache_resource
 def inisialisasi_gspread():
     scopes = [
@@ -44,7 +92,6 @@ except Exception as e:
     st.error(f"❌ Gagal tersambung ke Google Sheets. Periksa konfigurasi Secrets Anda. Error: {str(e)}")
     st.stop()
 
-# Membuat tab otomatis jika belum ada di Google Sheets
 def dapatkan_atau_buat_worksheet(nama_sheet, headers):
     try:
         return sheet_utama.worksheet(nama_sheet)
@@ -57,18 +104,19 @@ worksheet_summary = dapatkan_atau_buat_worksheet("Riwayat_Summary", ["Tanggal", 
 worksheet_tag = dapatkan_atau_buat_worksheet("Riwayat_Tag", ["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
 worksheet_raw_sales = dapatkan_atau_buat_worksheet("Raw_Sales", ["Nama Laporan", "Clean_Tag", "Nama Produk", "Kategori", "Item Terjual", "Komisi"])
 
+
 # ==========================================
-# 2. LOAD DATA DARI GOOGLE SHEETS KE SYSTEM
+# 2. LOAD DATA DARI GOOGLE SHEETS KE SYSTEM (DIKOREKSI)
 # ==========================================
 try:
     records_summary = worksheet_summary.get_all_records()
     if records_summary:
         df_load_summary = pd.DataFrame(records_summary)
         df_load_summary['Tanggal'] = pd.to_datetime(df_load_summary['Tanggal'], errors='coerce').dt.date
-        # Pastikan tipe data numeric aman saat dibaca dari Cloud
+        # Menggunakan fungsi sakti global agar kebal format mata uang di Cloud
         for col in ["Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"]:
             if col in df_load_summary.columns:
-                df_load_summary[col] = pd.to_numeric(df_load_summary[col], errors='coerce').fillna(0.0)
+                df_load_summary[col] = bersihkan_angka_sakti(df_load_summary[col])
     else:
         df_load_summary = pd.DataFrame(columns=["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
 except Exception as e:
@@ -77,7 +125,10 @@ except Exception as e:
 
 st.session_state['riwayat_summary'] = df_load_summary
 
-# Fungsi pembantu untuk membersihkan tag video/iklan
+
+# ==========================================
+# 3. AREA ENGINE PEMROSES DATA BARU
+# ==========================================
 def bersihkan_tag(x):
     if pd.isna(x) or str(x).strip() == "" or str(x).lower() == "nan":
         return "Organik"
@@ -86,7 +137,6 @@ def bersihkan_tag(x):
     if s.endswith('----'): s = s[:-4]
     return s
 
-# Fungsi Pencarian Kolom Cerdas & Sensitif
 def cari_kolom(list_kolom, kata_kunci_list, default_name):
     for col in list_kolom:
         c = str(col).strip().lower()
@@ -100,11 +150,9 @@ def cari_kolom(list_kolom, kata_kunci_list, default_name):
                 return col
     return default_name
 
-# 🔥 Fungsi Cerdas Pembaca CSV: Anti-Karakter Rusak & Kebal Salah Pembatas Kolom
 def baca_csv_sakti(file):
     raw_bytes = file.read()
     file.seek(0)
-    # Gunakan utf-8-sig untuk membuang penanda BOM \ufeff bawaan Shopee secara paksa
     try: teks = raw_bytes.decode('utf-8-sig')
     except: teks = raw_bytes.decode('latin-1')
     
@@ -139,10 +187,7 @@ def gaya_tabel_detail(row):
         gaya = ['background-color: #f0f4f8; border-left: 4px solid #1f77b4;'] * len(row)
     return gaya
 
-# ==========================================
-# 3. AREA UPLOAD FILE DI BAGIAN ATAS
-# ==========================================
-with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
+with St.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
     tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
     nama_bulan = BULAN_INDO[tanggal_laporan.month]
     default_nama = f"Laporan {tanggal_laporan.day:02d} {nama_bulan}"
@@ -175,7 +220,6 @@ if tombol_proses:
                     df_sales = df_temp
 
         if df_meta is not None and df_clicks is not None and df_sales is not None:
-            # Perluasan Logika Deteksi Kata Kunci
             kolom_pesanan = cari_kolom(df_sales.columns, ['id pesanan', 'order id', 'no pesanan', 'no. pesanan', 'id pemesanan'], df_sales.columns[0])
             kolom_tag_sales = cari_kolom(df_sales.columns, ['tag_link1', 'tag link', 'sub id', 'tag_link', 'tag'], 'Tag_link1')
             kolom_komisi_kotor = cari_kolom(df_sales.columns, ['total komisi per pesanan', 'komisi kotor', 'gross commission'], df_sales.columns[-1])
@@ -183,25 +227,6 @@ if tombol_proses:
             kolom_nama_produk = cari_kolom(df_sales.columns, ['nama produk', 'product name', 'info produk', 'judul', 'item', 'nama barang', 'product'], 'Nama Produk')
             kolom_kategori_produk = cari_kolom(df_sales.columns, ['kategori kunci', 'kategori', 'category', 'kategori produk'], 'Kategori')
             kolom_jumlah_item = cari_kolom(df_sales.columns, ['item terjual', 'jumlah', 'quantity', 'qty', 'jumlah produk'], 'Item Terjual')
-
-            # Pembersih Format Angka Rupiah
-            def bersihkan_angka_sakti(series):
-                def konversi_nilai(val):
-                    val = str(val).strip().replace('Rp', '').replace(' ', '')
-                    if not val or val.lower() == 'nan' or val == '-': return 0.0
-                    if ',' in val and '.' in val:
-                        if val.find('.') < val.find(','): val = val.replace('.', '').replace(',', '.')
-                        else: val = val.replace(',', '')
-                    elif ',' in val:
-                        parts = val.split(',')
-                        if len(parts[-1]) == 3: val = val.replace(',', '')
-                        else: val = val.replace(',', '.')
-                    elif '.' in val:
-                        parts = val.split('.')
-                        if len(parts[-1]) == 3: val = val.replace('.', '')
-                    try: return float(val)
-                    except: return 0.0
-                return series.apply(konversi_nilai)
 
             df_meta['Jumlah yang dibelanjakan (IDR)'] = bersihkan_angka_sakti(df_meta['Jumlah yang dibelanjakan (IDR)'])
             if 'Klik tautan' in df_meta.columns:
@@ -236,22 +261,20 @@ if tombol_proses:
             total_profit = total_komisi_nett - total_spend
 
             try:
-                # 1. Simpan Utama
-                worksheet_summary.append_row([str(tanggal_laporan), nama_laporan, float(total_spend), float(komisi_iklan_nett), float(komisi_organik_nett), float(total_komisi_nett), float(total_profit)])
+                # Menambahkan parameter USER_ENTERED agar Google Sheets memformat angka desimal dengan benar
+                worksheet_summary.append_row([str(tanggal_laporan), nama_laporan, float(total_spend), float(komisi_iklan_nett), float(komisi_organik_nett), float(total_komisi_nett), float(total_profit)], value_input_option='USER_ENTERED')
                 
-                # 2. Simpan Per Tag
                 rows_tag_to_save = []
                 for _, row in merged.iterrows():
                     rows_tag_to_save.append([nama_laporan, str(row['Tipe']), str(row['Clean_Tag']), float(row['Spend']), int(row['Klik_Meta']), int(row['Klik_Shopee']), int(row['Pesanan']), float(row['Kebocoran']), float(row['Komisi_Kotor']), float(row['Komisi_Bersih']), float(row['Profit_Rugi']), float(row['ROAS'])])
-                if rows_tag_to_save: worksheet_tag.append_rows(rows_tag_to_save)
+                if rows_tag_to_save: worksheet_tag.append_rows(rows_tag_to_save, value_input_option='USER_ENTERED')
                 
-                # 3. Simpan Item Penjualan Raw
                 rows_to_save = []
                 for _, row in df_sales.iterrows():
                     nama_prod_val = str(row[kolom_nama_produk]).strip() if kolom_nama_produk in df_sales.columns else "Produk Tidak Diketahui"
                     kat_prod_val = str(row[kolom_kategori_produk]).strip() if kolom_kategori_produk in df_sales.columns else "Umum"
                     rows_to_save.append([nama_laporan, str(row['Clean_Tag']), nama_prod_val, kat_prod_val, int(row[kolom_jumlah_item]), float(row[kolom_komisi_bersih])])
-                if rows_to_save: worksheet_raw_sales.append_rows(rows_to_save)
+                if rows_to_save: worksheet_raw_sales.append_rows(rows_to_save, value_input_option='USER_ENTERED')
                 
                 st.success(f"✅ Data '{nama_laporan}' Sukses Terkunci!")
                 st.rerun()
@@ -325,16 +348,35 @@ else:
         
         if st.button(f"🗑️ Hapus Laporan dari Cloud: {nama_laporan_klik}", type="secondary"):
             try:
-                cell = worksheet_summary.find(nama_laporan_klik)
-                worksheet_summary.delete_rows(cell.row)
-                
-                cells_raw = worksheet_raw_sales.findall(nama_laporan_klik)
-                for r in sorted(list(set([c.row for c in cells_raw])), reverse=True): worksheet_raw_sales.delete_rows(r)
-                
-                cells_tag = worksheet_tag.findall(nama_laporan_klik)
-                for r in sorted(list(set([c.row for c in cells_tag])), reverse=True): worksheet_tag.delete_rows(r)
+                def hapus_laporan_aman(worksheet, nama_lap, headers):
+                    records = worksheet.get_all_records()
+                    if records:
+                        df_temp = pd.DataFrame(records)
+                        if "Nama Laporan" in df_temp.columns:
+                            df_sisa = df_temp[df_temp["Nama Laporan"] != nama_lap]
+                            
+                            worksheet.clear()
+                            worksheet.append_row(headers)
+                            
+                            if not df_sisa.empty:
+                                # Konversi kolom berbasis teks/tanggal objek ke string agar aman ditransfer JSON
+                                for col in df_sisa.columns:
+                                    if pd.api.types.is_datetime64_any_dtype(df_sisa[col]) or df_sisa[col].dtype == 'object':
+                                        df_sisa[col] = df_sisa[col].astype(str)
+                                
+                                data_array = df_sisa.values.tolist()
+                                # Menggunakan USER_ENTERED agar Google Sheets otomatis memformat angka murni
+                                worksheet.append_rows(data_array, value_input_option='USER_ENTERED')
+                    else:
+                        worksheet.clear()
+                        worksheet.append_row(headers)
+
+                with st.spinner("Sedang membersihkan dan menyinkronkan ulang data di Cloud..."):
+                    hapus_laporan_aman(worksheet_summary, nama_laporan_klik, ["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
+                    hapus_laporan_aman(worksheet_tag, nama_laporan_klik, ["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
+                    hapus_laporan_aman(worksheet_raw_sales, nama_laporan_klik, ["Nama Laporan", "Clean_Tag", "Nama Produk", "Kategori", "Item Terjual", "Komisi"])
                     
-                st.toast("Sukses menghapus data lama!")
+                st.toast("Sukses menghapus data lama dengan aman!")
                 st.rerun()
             except Exception as del_e:
                 st.error(f"Gagal menghapus: {str(del_e)}")
@@ -354,10 +396,9 @@ else:
             df_detail_tampil = pd.DataFrame()
 
         if not df_detail_tampil.empty:
-            # Paksa konversi tipe data numerik agar kalkulasi detail presisi
             for col in ['Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Komisi_Bersih', 'Profit_Rugi', 'ROAS']:
                 if col in df_detail_tampil.columns:
-                    df_detail_tampil[col] = pd.to_numeric(df_detail_tampil[col], errors='coerce').fillna(0.0)
+                    df_detail_tampil[col] = bersihkan_angka_sakti(df_detail_tampil[col])
 
             df_iklan_aktif = df_detail_tampil[df_detail_tampil['Tipe'] == "IKLAN (AKTIF)"]
             total_spend_iklan = df_iklan_aktif['Spend'].sum()
@@ -401,7 +442,7 @@ else:
                         kolom_item_sh = cari_kolom(df_product_selected.columns, ['item terjual', 'jumlah', 'quantity', 'qty'], 'Item Terjual')
                         kolom_komisi_sh = cari_kolom(df_product_selected.columns, ['komisi', 'commission'], 'Komisi')
 
-                        df_product_selected[kolom_komisi_sh] = pd.to_numeric(df_product_selected[kolom_komisi_sh], errors='coerce').fillna(0.0)
+                        df_product_selected[kolom_komisi_sh] = bersihkan_angka_sakti(df_product_selected[kolom_komisi_sh])
                         df_product_selected[kolom_item_sh] = pd.to_numeric(df_product_selected[kolom_item_sh], errors='coerce').fillna(1).astype(int)
 
                         df_produk_tampil = df_product_selected.groupby([kolom_nama_sh, kolom_kat_sh]).agg(
