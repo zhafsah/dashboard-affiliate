@@ -16,35 +16,27 @@ def bersihkan_angka_sakti(series):
         if isinstance(val, (int, float)):
             return float(val)
         
-        # Bersihkan spasi dan simbol mata uang
         s = str(val).strip().replace('Rp', '').replace(' ', '')
         if not s or s.lower() in ['nan', '-', 'null']:
             return 0.0
         
-        # Percobaan 1: Coba konversi langsung (Aman untuk format float standar '150000.0' atau '0.123')
         try:
             return float(s)
         except ValueError:
             pass
         
-        # Percobaan 2: Penanganan jika gagal karena campuran tanda baca (ribuan/desimal)
         if ',' in s and '.' in s:
             if s.find('.') < s.find(','):
-                # Format Indonesia: 1.500.000,00 -> Hapus titik, ubah koma jadi titik
                 s = s.replace('.', '').replace(',', '.')
             else:
-                # Format US: 1,500,000.00 -> Hapus koma
                 s = s.replace(',', '')
         elif ',' in s:
             parts = s.split(',')
             if len(parts[-1]) == 3 and len(parts) > 1:
-                # Kemungkinan pemisah ribuan: 1,500 -> 1500
                 s = s.replace(',', '')
             else:
-                # Kemungkinan desimal: 5,50 -> 5.50
                 s = s.replace(',', '.')
         elif '.' in s:
-            # Jika lolos ke sini berarti gagal di float awal, kemungkinan multi-titik ribuan: 1.500.000
             s = s.replace('.', '')
             
         try:
@@ -106,14 +98,13 @@ worksheet_raw_sales = dapatkan_atau_buat_worksheet("Raw_Sales", ["Nama Laporan",
 
 
 # ==========================================
-# 2. LOAD DATA DARI GOOGLE SHEETS KE SYSTEM (DIKOREKSI)
+# 2. LOAD DATA DARI GOOGLE SHEETS KE SYSTEM
 # ==========================================
 try:
     records_summary = worksheet_summary.get_all_records()
     if records_summary:
         df_load_summary = pd.DataFrame(records_summary)
         df_load_summary['Tanggal'] = pd.to_datetime(df_load_summary['Tanggal'], errors='coerce').dt.date
-        # Menggunakan fungsi sakti global agar kebal format mata uang di Cloud
         for col in ["Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"]:
             if col in df_load_summary.columns:
                 df_load_summary[col] = bersihkan_angka_sakti(df_load_summary[col])
@@ -187,7 +178,8 @@ def gaya_tabel_detail(row):
         gaya = ['background-color: #f0f4f8; border-left: 4px solid #1f77b4;'] * len(row)
     return gaya
 
-with St.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
+# 🔥 SUDAH DIPERBAIKI: Menggunakan st.expander huruf kecil
+with st.expander("📤 AREA UPLOAD FILE BARU (Drop 3 File CSV Mentah Anda Sekaligus)", expanded=True):
     tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
     nama_bulan = BULAN_INDO[tanggal_laporan.month]
     default_nama = f"Laporan {tanggal_laporan.day:02d} {nama_bulan}"
@@ -261,7 +253,6 @@ if tombol_proses:
             total_profit = total_komisi_nett - total_spend
 
             try:
-                # Menambahkan parameter USER_ENTERED agar Google Sheets memformat angka desimal dengan benar
                 worksheet_summary.append_row([str(tanggal_laporan), nama_laporan, float(total_spend), float(komisi_iklan_nett), float(komisi_organik_nett), float(total_komisi_nett), float(total_profit)], value_input_option='USER_ENTERED')
                 
                 rows_tag_to_save = []
@@ -359,13 +350,11 @@ else:
                             worksheet.append_row(headers)
                             
                             if not df_sisa.empty:
-                                # Konversi kolom berbasis teks/tanggal objek ke string agar aman ditransfer JSON
                                 for col in df_sisa.columns:
                                     if pd.api.types.is_datetime64_any_dtype(df_sisa[col]) or df_sisa[col].dtype == 'object':
                                         df_sisa[col] = df_sisa[col].astype(str)
                                 
                                 data_array = df_sisa.values.tolist()
-                                # Menggunakan USER_ENTERED agar Google Sheets otomatis memformat angka murni
                                 worksheet.append_rows(data_array, value_input_option='USER_ENTERED')
                     else:
                         worksheet.clear()
