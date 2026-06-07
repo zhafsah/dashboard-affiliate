@@ -7,7 +7,7 @@ import json
 import io
 
 # ==========================================
-# 0. FUNGSI GLOBAL PEMBERSIH ANGKA SAKTI
+# 0. FUNGSI GLOBAL PEMBERSIH ANGKA SAKTI (FIXED ROAS)
 # ==========================================
 def bersihkan_angka_sakti(series):
     def konversi_nilai(val):
@@ -16,11 +16,21 @@ def bersihkan_angka_sakti(series):
         if isinstance(val, (int, float)):
             return float(val)
         
-        # PERBAIKAN: Menghapus '%' agar data persentase kebocoran tidak gagal dikonversi menjadi float
-        s = str(val).strip().replace('Rp', '').replace('%', '').replace(' ', '')
+        # Bersihkan simbol-simbol pengganggu string
+        s = str(val).strip().replace('Rp', '').replace('%', '').replace('x', '').replace(' ', '')
         if not s or s.lower() in ['nan', '-', 'null']:
             return 0.0
         
+        # 🔥 FIX DETEKSI TITIK INDONESIA: Mencegah Spend/Komisi terbagi salah yang merusak ROAS
+        if s.count('.') > 1 and ',' not in s:
+            s = s.replace('.', '')  # Kasus multi-titik: 1.000.000 -> 1000000
+        elif s.count('.') == 1 and ',' not in s:
+            parts = s.split('.')
+            if len(parts[-1]) == 3:  # Kasus satu titik ribuan: 1.000 -> 1000
+                s = s.replace('.', '')
+            # Jika len(parts[-1]) == 2 (seperti 2.89), biarkan titik sebagai desimal murni
+        
+        # Penanganan campuran koma dan titik desimal tradisional
         if ',' in s and '.' in s:
             if s.find('.') < s.find(','):
                 s = s.replace('.', '').replace(',', '.')
@@ -28,9 +38,7 @@ def bersihkan_angka_sakti(series):
                 s = s.replace(',', '')
         elif ',' in s:
             parts = s.split(',')
-            if len(parts[-1]) == 2:  
-                s = s.replace(',', '.')
-            elif len(parts[-1]) == 3 and len(parts) > 1:
+            if len(parts[-1]) == 3 and len(parts) > 1:
                 s = s.replace(',', '')
             else:
                 s = s.replace(',', '.')
@@ -185,12 +193,12 @@ def baca_csv_sakti(file):
     df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", "")
     return df
 
+# 🔥 FIX ATURAN WARNA KEBOCORAN: Minus (Hijau), Positif/Sebaliknya (Merah)
 def gaya_tabel_detail(row):
     gaya = [''] * len(row)
-    if 'Klik_Meta' in row.index and 'Klik_Shopee' in row.index:
-        k_meta = row['Klik_Meta']
-        k_shopee = row['Klik_Shopee']
-        warna = 'background-color: #d4edda; color: #155724;' if k_shopee >= k_meta else 'background-color: #f8d7da; color: #721c24;'
+    if 'Kebocoran' in row.index:
+        val_kebocoran = row['Kebocoran']
+        warna = 'background-color: #d4edda; color: #155724;' if val_kebocoran < 0 else 'background-color: #f8d7da; color: #721c24;'
         gaya[row.index.get_loc('Kebocoran')] = warna
     return gaya
 
@@ -256,8 +264,8 @@ if tombol_proses:
 
             merged['Tipe'] = merged.apply(lambda r: "IKLAN (AKTIF)" if r['Clean_Tag'] in ad_tags and r['Spend'] > 0 else "ORGANIK", axis=1)
             
-            # PERBAIKAN: Rumus Kebocoran murni & aman dari hasil minus akibat crossover tracking kustom
-            merged['Kebocoran'] = merged.apply(lambda r: max(0.0, ((r['Klik_Meta'] - r['Klik_Shopee']) / r['Klik_Meta']) * 100) if r['Klik_Meta'] > 0 else 0.0, axis=1)
+            # 🔥 FIX RUMUS KEBOCORAN: Mengizinkan angka minus jika klik Shopee > klik Meta
+            merged['Kebocoran'] = merged.apply(lambda r: ((r['Klik_Meta'] - r['Klik_Shopee']) / r['Klik_Meta']) * 100 if r['Klik_Meta'] > 0 else 0.0, axis=1)
             merged['Profit_Rugi'] = merged['Komisi_Bersih'] - merged['Spend']
             merged['ROAS'] = merged.apply(lambda r: r['Komisi_Bersih'] / r['Spend'] if r['Spend'] > 0 else 0.0, axis=1)
             
@@ -325,42 +333,29 @@ if not df_filtered.empty:
 
 
 # ==========================================
-# 5. PERBAIKAN KOTAK METRIK SUMMARY (KPI UTAMA)
-# Posisinya tepat berada di atas tulisan "Riwayat Laporan Harian"
+# 5. KOTAK METRIK SUMMARY (KPI UTAMA)
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
-
-# Membuat susunan 5 Kolom Sejajar sesuai permintaan instruksi baru Anda
 col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
 
 val_spend = pd.to_numeric(df_filtered['Spend'], errors='coerce').sum() if not df_filtered.empty else 0
 val_komisi_iklan = pd.to_numeric(df_filtered['Komisi Iklan'], errors='coerce').sum() if not df_filtered.empty else 0
 val_komisi_organik = pd.to_numeric(df_filtered['Komisi Organik'], errors='coerce').sum() if not df_filtered.empty else 0
-
-# Matematika keuntungan iklan & total keuntungan gabungan
 val_keuntungan_iklan = val_komisi_iklan - val_spend
 val_total_keuntungan = pd.to_numeric(df_filtered['Profit'], errors='coerce').sum() if not df_filtered.empty else 0
 
 with col_m1: 
     st.metric(label="💸 Total Pengeluaran Iklan", value=f"Rp {val_spend:,.0f}")
-
 with col_m2: 
     st.metric(label="🎯 Total Komisi Iklan (Meta)", value=f"Rp {val_komisi_iklan:,.0f}")
-
 with col_m3: 
-    st.metric(label="📱 Total Komisi Organik (Shopee Video)", value=f"Rp {val_komisi_organik:,.0f}")
-
+    st.metric(label="📱 Total Komisi Organik", value=f"Rp {val_komisi_organik:,.0f}")
 with col_m4: 
-    # PERBAIKAN: Menentukan warna dinamis menggunakan HTML Markdown (Hijau = Untung, Merah = Rugi)
     warna_teks_iklan = "green" if val_keuntungan_iklan >= 0 else "red"
-    st.markdown("**Keuntungan (Profit/Rugi) Iklan**")
-    st.markdown(
-        f"<h3 style='color: {warna_teks_iklan}; margin-top: 4px; margin-bottom: 0px; font-weight: bold;'>Rp {val_keuntungan_iklan:,.0f}</h3>", 
-        unsafe_allow_html=True
-    )
-
+    st.markdown("**Keuntungan Iklan**")
+    st.markdown(f"<h3 style='color: {warna_teks_iklan}; margin-top: 4px; font-weight: bold;'>Rp {val_keuntungan_iklan:,.0f}</h3>", unsafe_allow_html=True)
 with col_m5: 
-    st.metric(label="📈 Total Keuntungan (Iklan + Organik)", value=f"Rp {val_total_keuntungan:,.0f}")
+    st.metric(label="📈 Keuntungan Bersih (Total)", value=f"Rp {val_total_keuntungan:,.0f}")
 
 
 # ==========================================
@@ -408,7 +403,7 @@ else:
 
 
         # ==========================================
-        # 7. PERBAIKAN HASIL BEDAH DATA DETIL (ROAS & KEBOCORAN)
+        # 7. HASIL BEDAH DATA DETIL PER VIDEO
         # ==========================================
         st.markdown("---")
         st.subheader(f"🔍 Hasil Bedah Data Rinci: {nama_laporan_klik}")
@@ -425,17 +420,16 @@ else:
             total_klik_meta = df_iklan_aktif['Klik_Meta'].sum()
             total_klik_shopee = df_iklan_aktif['Klik_Shopee'].sum()
             
-            # PERBAIKAN UTAMA: Matematika ROAS & Kebocoran Makro agar nilainya presisi & rasional
+            # 🔥 MACRO KPI FIXED: ROAS Gabungan Akurat & Kebocoran Total Akurat
             roas_iklan_gabungan = (df_iklan_aktif['Komisi_Bersih'].sum() / total_spend_iklan) if total_spend_iklan > 0 else 0.0
-            kebocoran_gabungan = max(0.0, ((total_klik_meta - total_klik_shopee) / total_klik_meta) * 100) if total_klik_meta > 0 else 0.0
+            kebocoran_gabungan = ((total_klik_meta - total_klik_shopee) / total_klik_meta) * 100 if total_klik_meta > 0 else 0.0
             
-            # Menampilkan ringkasan metrik iklan rinci dengan 5 Kolom agar lengkap dengan angka Kebocoran
             col_ad1, col_ad2, col_ad3, col_ad4, col_ad5 = st.columns(5)
             with col_ad1: st.metric(label="💳 Total Spend Iklan", value=f"Rp {total_spend_iklan:,.0f}")
             with col_ad2: st.metric(label="🖱️ Total Klik Meta", value=f"{total_klik_meta:,.0f} Klik")
             with col_ad3: st.metric(label="🛍️ Total Klik Shopee (Iklan)", value=f"{total_klik_shopee:,.0f} Klik")
             with col_ad4: st.metric(label="📊 ROAS (Murni Iklan)", value=f"{roas_iklan_gabungan:,.2f}x")
-            with col_ad5: st.metric(label="📉 Kebocoran Klik Iklan", value=f"{kebocoran_gabungan:,.2f}%")
+            with col_ad5: st.metric(label="📉 Total Kebocoran", value=f"{kebocoran_gabungan:,.2f}%")
             
             st.write("💡 *Klik salah satu baris di bawah ini untuk melihat detail produk:*")
 
