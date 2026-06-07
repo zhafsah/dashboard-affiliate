@@ -20,24 +20,24 @@ def bersihkan_angka_sakti(series):
         if not s or s.lower() in ['nan', '-', 'null']:
             return 0.0
         
-        if s.count('.') > 1 and ',' not in s:
-            s = s.replace('.', '')  
-        elif s.count('.') == 1 and ',' not in s:
-            parts = s.split('.')
-            if len(parts[-1]) == 3:  
-                s = s.replace('.', '')
-        
+        # JIKA ada titik dan koma sekaligus (misal: 35.802,40 atau 35,802.40)
         if ',' in s and '.' in s:
             if s.find('.') < s.find(','):
                 s = s.replace('.', '').replace(',', '.')
             else:
                 s = s.replace(',', '')
+        # JIKA hanya ada koma (misal: 35802,40 atau 35,802)
         elif ',' in s:
             parts = s.split(',')
             if len(parts[-1]) == 3 and len(parts) > 1:
                 s = s.replace(',', '')
             else:
                 s = s.replace(',', '.')
+        # JIKA hanya ada titik (misal: 35.802 atau 35802.40)
+        elif '.' in s:
+            parts = s.split('.')
+            if len(parts[-1]) == 3 and len(parts[0]) <= 3:
+                s = s.replace('.', '')
                 
         try:
             return float(s)
@@ -99,13 +99,14 @@ worksheet_raw_sales = dapatkan_atau_buat_worksheet("Raw_Sales", ["Nama Laporan",
 if 'riwayat_summary' not in st.session_state:
     with st.spinner("Sinkronisasi aman data cloud harian..."):
         try:
-            records_summary = worksheet_summary.get_all_records()
+            # Menggunakan UNFORMATTED_VALUE agar data angka dari Google Sheets ditarik sebagai float murni
+            records_summary = worksheet_summary.get_all_records(value_render_option='UNFORMATTED_VALUE')
             df_load_summary = pd.DataFrame(records_summary) if records_summary else pd.DataFrame(columns=["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
             
-            records_tag = worksheet_tag.get_all_records()
+            records_tag = worksheet_tag.get_all_records(value_render_option='UNFORMATTED_VALUE')
             df_load_tag = pd.DataFrame(records_tag) if records_tag else pd.DataFrame()
             
-            records_sales = worksheet_raw_sales.get_all_records()
+            records_sales = worksheet_raw_sales.get_all_records(value_render_option='UNFORMATTED_VALUE')
             df_load_sales = pd.DataFrame(records_sales) if records_sales else pd.DataFrame()
 
             if not df_load_summary.empty:
@@ -157,7 +158,6 @@ def baca_csv_sakti(file):
     df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", "")
     return df
 
-# 🔥 ATURAN WARNA KEBOCORAN: Minus (Hijau), Positif (Merah)
 def gaya_tabel_detail(row):
     gaya = [''] * len(row)
     if 'Kebocoran' in row.index:
@@ -296,7 +296,7 @@ if not df_filtered.empty:
 
 
 # ==========================================
-# 5. KOTAK METRIK SUMMARY (KPI UTAMA)
+# 5. KOTAK METRIK SUMMARY INDONESIA PALETTE
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
 col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
@@ -308,17 +308,17 @@ val_keuntungan_iklan = val_komisi_iklan - val_spend
 val_total_keuntungan = pd.to_numeric(df_filtered['Profit'], errors='coerce').sum() if not df_filtered.empty else 0
 
 with col_m1: 
-    st.metric(label="💸 Total Pengeluaran Iklan", value=f"Rp {val_spend:,.0f}")
+    st.metric(label="💸 Total Pengeluaran Iklan", value=f"Rp {int(round(val_spend)):,}".replace(',', '.'))
 with col_m2: 
-    st.metric(label="🎯 Total Komisi Iklan (Meta)", value=f"Rp {val_komisi_iklan:,.0f}")
+    st.metric(label="🎯 Total Komisi Iklan (Meta)", value=f"Rp {int(round(val_komisi_iklan)):,}".replace(',', '.'))
 with col_m3: 
-    st.metric(label="📱 Total Komisi Organik", value=f"Rp {val_komisi_organik:,.0f}")
+    st.metric(label="📱 Total Komisi Organik", value=f"Rp {int(round(val_komisi_organik)):,}".replace(',', '.'))
 with col_m4: 
     warna_teks_iklan = "green" if val_keuntungan_iklan >= 0 else "red"
     st.markdown("**Keuntungan Iklan**")
-    st.markdown(f"<h3 style='color: {warna_teks_iklan}; margin-top: 4px; font-weight: bold;'>Rp {val_keuntungan_iklan:,.0f}</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color: {warna_teks_iklan}; margin-top: 4px; font-weight: bold;'>Rp {int(round(val_keuntungan_iklan)):,}".replace(',', '.') + "</h3>", unsafe_allow_html=True)
 with col_m5: 
-    st.metric(label="📈 Keuntungan Bersih (Total)", value=f"Rp {val_total_keuntungan:,.0f}")
+    st.metric(label="📈 Keuntungan Bersih (Total)", value=f"Rp {int(round(val_total_keuntungan)):,}".replace(',', '.'))
 
 
 # ==========================================
@@ -329,7 +329,15 @@ st.subheader("📋 Riwayat Laporan Harian")
 if df_filtered.empty:
     st.info("Belum ada data terekam pada periode ini.")
 else:
-    df_styled_summary = df_filtered.style.format({'Spend': 'Rp{:,.0f}', 'Komisi Iklan': 'Rp{:,.0f}', 'Komisi Organik': 'Rp{:,.0f}', 'Total Komisi (Nett)': 'Rp{:,.0f}', 'Profit': 'Rp{:,.0f}'}).apply(gaya_tabel_summary, axis=1)
+    # Mengubah format visual US menjadi ID (Koma jadi Titik)
+    df_styled_summary = df_filtered.style.format({
+        'Spend': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+        'Komisi Iklan': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+        'Komisi Organik': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+        'Total Komisi (Nett)': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+        'Profit': lambda x: f"Rp {int(round(x)):,}".replace(',', '.')
+    }).apply(gaya_tabel_summary, axis=1)
+    
     event_pilih = st.dataframe(df_styled_summary, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
 
     if event_pilih and len(event_pilih["selection"]["rows"]) > 0:
@@ -340,7 +348,7 @@ else:
         if st.button(f"🗑️ Hapus Laporan dari Cloud: {nama_laporan_klik}", type="secondary"):
             try:
                 def hapus_laporan_aman(worksheet, nama_lap, headers):
-                    records = worksheet.get_all_records()
+                    records = worksheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
                     if records:
                         df_temp = pd.DataFrame(records)
                         if "Nama Laporan" in df_temp.columns:
@@ -378,7 +386,7 @@ else:
             df_detail_tampil = pd.DataFrame()
 
         if not df_detail_tampil.empty:
-            # 🔥 RE-KALKULASI DINAMIS: Mengunci jaminan formula ROAS & Kebocoran 100% Akurat anti-salah baca database
+            # Rekalkulasi Dinamis Pengunci Formula Akurasi Tinggi
             df_detail_tampil['ROAS'] = df_detail_tampil.apply(lambda r: r['Komisi_Bersih'] / r['Spend'] if r['Spend'] > 0 else 0.0, axis=1)
             df_detail_tampil['Kebocoran'] = df_detail_tampil.apply(lambda r: ((r['Klik_Meta'] - r['Klik_Shopee']) / r['Klik_Meta']) * 100 if r['Klik_Meta'] > 0 else 0.0, axis=1)
 
@@ -392,23 +400,29 @@ else:
             kebocoran_gabungan = ((total_klik_meta - total_klik_shopee) / total_klik_meta) * 100 if total_klik_meta > 0 else 0.0
             
             col_ad1, col_ad2, col_ad3, col_ad4, col_ad5 = st.columns(5)
-            with col_ad1: st.metric(label="💳 Total Spend Iklan", value=f"Rp {total_spend_iklan:,.0f}")
-            with col_ad2: st.metric(label="🖱️ Total Klik Meta", value=f"{total_klik_meta:,.0f} Klik")
-            with col_ad3: st.metric(label="🛍️ Total Klik Shopee (Iklan)", value=f"{total_klik_shopee:,.0f} Klik")
+            with col_ad1: st.metric(label="💳 Total Spend Iklan", value=f"Rp {int(round(total_spend_iklan)):,}".replace(',', '.'))
+            with col_ad2: st.metric(label="🖱️ Total Klik Meta", value=f"{total_klik_meta:,.0f}".replace(',', '.') + " Klik")
+            with col_ad3: st.metric(label="🛍️ Total Klik Shopee (Iklan)", value=f"{total_klik_shopee:,.0f}".replace(',', '.') + " Klik")
             with col_ad4: st.metric(label="📊 ROAS (Murni Iklan)", value=f"{roas_iklan_gabungan:,.2f}x")
             with col_ad5: st.metric(label="📉 Total Kebocoran", value=f"{kebocoran_gabungan:,.2f}%")
             
             st.write("💡 *Klik salah satu baris pada tabel di bawah ini untuk melihat detail produk:*")
 
-            # MENGISI VARIABEL PEMILIH TAG DARI KEDUA TABEL
             tag_terpilih = None
 
             # 🅰️ TABEL ATAS: KELOMPOK IKLAN AKTIF
             st.markdown("#### 🎯 Kelompok Iklan Aktif")
             if not df_iklan_aktif.empty:
                 df_styled_iklan = df_iklan_aktif[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Komisi_Bersih', 'Profit_Rugi', 'ROAS']].style.format({
-                    'Spend': 'Rp{:,.0f}', 'Komisi_Kotor': 'Rp{:,.0f}', 'Komisi_Bersih': 'Rp{:,.0f}', 'Profit_Rugi': 'Rp{:,.0f}', 
-                    'ROAS': '{:,.2f}x', 'Klik_Meta': '{:,.0f}', 'Klik_Shopee': '{:,.0f}', 'Pesanan': '{:,.0f}', 'Kebocoran': '{:,.2f}%'
+                    'Spend': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+                    'Komisi_Kotor': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+                    'Komisi_Bersih': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+                    'Profit_Rugi': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+                    'ROAS': '{:,.2f}x', 
+                    'Klik_Meta': lambda x: f"{int(x):,}".replace(',', '.'), 
+                    'Klik_Shopee': lambda x: f"{int(x):,}".replace(',', '.'), 
+                    'Pesanan': lambda x: f"{int(x):,}".replace(',', '.'), 
+                    'Kebocoran': '{:,.2f}%'
                 }).apply(gaya_tabel_detail, axis=1)
                 
                 event_klik_iklan = st.dataframe(df_styled_iklan, use_container_width=True, hide_index=True, on_select="rerun", key="grid_iklan_aktif", selection_mode="single-row")
@@ -418,17 +432,22 @@ else:
             else:
                 st.info("Tidak ada tracker dengan status Iklan Aktif.")
 
-            # 🅱️ TABEL BAWAH: KELOMPOK ORGANIK / TIDAK AKTIF (Diurutkan dari Penjualan Terbesar)
+            # 🅱️ TABEL BAWAH: KELOMPOK ORGANIK / TIDAK AKTIF (Urutan Penjualan Terbesar)
             st.markdown("#### 📱 Kelompok Organik / Tidak Aktif")
             df_organik = df_detail_tampil[df_detail_tampil['Tipe'] != "IKLAN (AKTIF)"].copy()
-            
-            # 🔥 URUTKAN PENJUALAN TERBESAR (Berdasarkan jumlah Pesanan, lalu Komisi Bersih)
             df_organik = df_organik.sort_values(by=['Pesanan', 'Komisi_Bersih'], ascending=[False, False])
 
             if not df_organik.empty:
                 df_styled_organik = df_organik[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Komisi_Bersih', 'Profit_Rugi', 'ROAS']].style.format({
-                    'Spend': 'Rp{:,.0f}', 'Komisi_Kotor': 'Rp{:,.0f}', 'Komisi_Bersih': 'Rp{:,.0f}', 'Profit_Rugi': 'Rp{:,.0f}', 
-                    'ROAS': '{:,.2f}x', 'Klik_Meta': '{:,.0f}', 'Klik_Shopee': '{:,.0f}', 'Pesanan': '{:,.0f}', 'Kebocoran': '{:,.2f}%'
+                    'Spend': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+                    'Komisi_Kotor': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+                    'Komisi_Bersih': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+                    'Profit_Rugi': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
+                    'ROAS': '{:,.2f}x', 
+                    'Klik_Meta': lambda x: f"{int(x):,}".replace(',', '.'), 
+                    'Klik_Shopee': lambda x: f"{int(x):,}".replace(',', '.'), 
+                    'Pesanan': lambda x: f"{int(x):,}".replace(',', '.'), 
+                    'Kebocoran': '{:,.2f}%'
                 }).apply(gaya_tabel_detail, axis=1)
                 
                 event_klik_organik = st.dataframe(df_styled_organik, use_container_width=True, hide_index=True, on_select="rerun", key="grid_organik", selection_mode="single-row")
@@ -462,4 +481,7 @@ else:
                         ).reset_index()
                         
                         df_produk_tampil.columns = ['Nama Produk', 'Kategori', 'Item Terjual', 'Komisi Bersih']
-                        st.dataframe(df_produk_tampil.style.format({'Item Terjual': '{:,.0f}', 'Komisi Bersih': 'Rp{:,.0f}'}), use_container_width=True, hide_index=True)
+                        st.dataframe(df_produk_tampil.style.format({
+                            'Item Terjual': lambda x: f"{int(x):,}".replace(',', '.'), 
+                            'Komisi Bersih': lambda x: f"Rp {int(round(x)):,}".replace(',', '.')
+                        }), use_container_width=True, hide_index=True)
