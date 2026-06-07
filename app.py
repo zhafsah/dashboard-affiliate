@@ -16,7 +16,8 @@ def bersihkan_angka_sakti(series):
         if isinstance(val, (int, float)):
             return float(val)
         
-        s = str(val).strip().replace('Rp', '').replace(' ', '')
+        # PERBAIKAN: Menghapus '%' agar data persentase kebocoran tidak gagal dikonversi menjadi float
+        s = str(val).strip().replace('Rp', '').replace('%', '').replace(' ', '')
         if not s or s.lower() in ['nan', '-', 'null']:
             return 0.0
         
@@ -89,7 +90,7 @@ worksheet_raw_sales = dapatkan_atau_buat_worksheet("Raw_Sales", ["Nama Laporan",
 
 
 # ==========================================
-# 2. SINKRONISASI OTOMATIS & HEALING DATA (100x FIX)
+# 2. SINKRONISASI OTOMATIS & HEALING DATA
 # ==========================================
 if 'riwayat_summary' not in st.session_state:
     with st.spinner("Sinkronisasi aman data cloud harian..."):
@@ -117,7 +118,7 @@ if 'riwayat_summary' not in st.session_state:
                 if 'Komisi' in df_load_sales.columns: df_load_sales['Komisi'] = bersihkan_angka_sakti(df_load_sales['Komisi'])
                 if 'Item Terjual' in df_load_sales.columns: df_load_sales['Item Terjual'] = pd.to_numeric(df_load_sales['Item Terjual'], errors='coerce').fillna(1).astype(int)
 
-            # 🛡️ ENGINE SELF-HEALING: Deteksi Data Lama yang Terinflasi 100x Lipat
+            # ENGINE SELF-HEALING
             laporan_terinflasi = set()
             if not df_load_tag.empty:
                 kondisi_inflasi = (df_load_tag['Tipe'] == "IKLAN (AKTIF)") & (df_load_tag['Spend'] > 0) & (df_load_tag['ROAS'] > 15.0)
@@ -126,7 +127,6 @@ if 'riwayat_summary' not in st.session_state:
                 kondisi_sum_inflasi = (df_load_summary['Spend'] > 0) & ((df_load_summary['Total Komisi (Nett)'] / df_load_summary['Spend']) > 15.0)
                 laporan_terinflasi.update(df_load_summary[kondisi_sum_inflasi]['Nama Laporan'].unique())
 
-            # Normalisasi data lama ke nominal asli
             for nama_lap in laporan_terinflasi:
                 if not df_load_summary.empty:
                     idx = df_load_summary['Nama Laporan'] == nama_lap
@@ -190,8 +190,7 @@ def gaya_tabel_detail(row):
     if 'Klik_Meta' in row.index and 'Klik_Shopee' in row.index:
         k_meta = row['Klik_Meta']
         k_shopee = row['Klik_Shopee']
-        # Aturan Warna Kebocoran Baru: Shopee > Meta (Hijau), Sebaliknya (Merah) - Tanpa Bold
-        warna = 'background-color: #d4edda; color: #155724;' if k_shopee > k_meta else 'background-color: #f8d7da; color: #721c24;'
+        warna = 'background-color: #d4edda; color: #155724;' if k_shopee >= k_meta else 'background-color: #f8d7da; color: #721c24;'
         gaya[row.index.get_loc('Kebocoran')] = warna
     return gaya
 
@@ -256,7 +255,9 @@ if tombol_proses:
             merged = pd.merge(merged, sales_sum, on='Clean_Tag', how='outer').fillna(0)
 
             merged['Tipe'] = merged.apply(lambda r: "IKLAN (AKTIF)" if r['Clean_Tag'] in ad_tags and r['Spend'] > 0 else "ORGANIK", axis=1)
-            merged['Kebocoran'] = merged.apply(lambda r: ((r['Klik_Meta'] - r['Klik_Shopee']) / r['Klik_Meta']) * 100 if r['Klik_Meta'] > 0 else 0.0, axis=1)
+            
+            # PERBAIKAN: Rumus Kebocoran murni & aman dari hasil minus akibat crossover tracking kustom
+            merged['Kebocoran'] = merged.apply(lambda r: max(0.0, ((r['Klik_Meta'] - r['Klik_Shopee']) / r['Klik_Meta']) * 100) if r['Klik_Meta'] > 0 else 0.0, axis=1)
             merged['Profit_Rugi'] = merged['Komisi_Bersih'] - merged['Spend']
             merged['ROAS'] = merged.apply(lambda r: r['Komisi_Bersih'] / r['Spend'] if r['Spend'] > 0 else 0.0, axis=1)
             
@@ -267,7 +268,6 @@ if tombol_proses:
             total_profit = total_komisi_nett - total_spend
 
             try:
-                # 🔥 MENGGUNAKAN value_input_option='RAW' AGAR GOOGLE SHEETS TIDAK MERUSAK DESIMAL LAGI
                 worksheet_summary.append_row([str(tanggal_laporan), nama_laporan, float(total_spend), float(komisi_iklan_nett), float(komisi_organik_nett), float(total_komisi_nett), float(total_profit)], value_input_option='RAW')
                 
                 rows_tag_to_save = []
@@ -282,7 +282,6 @@ if tombol_proses:
                     rows_to_save.append([nama_laporan, str(row['Clean_Tag']), nama_prod_val, kat_prod_val, int(row[kolom_jumlah_item]), float(row[kolom_komisi_bersih])])
                 if rows_to_save: worksheet_raw_sales.append_rows(rows_to_save, value_input_option='RAW')
                 
-                # Invalidate Cache agar otomatis reload database
                 if 'riwayat_summary' in st.session_state: del st.session_state['riwayat_summary']
                 st.success(f"✅ Data '{nama_laporan}' Berhasil Tersimpan Otomatis!")
                 st.rerun()
@@ -324,23 +323,50 @@ df_filtered = st.session_state.get('riwayat_summary', pd.DataFrame())
 if not df_filtered.empty:
     df_filtered = df_filtered[(df_filtered['Tanggal'] >= filter_start) & (df_filtered['Tanggal'] <= filter_end)]
 
+
 # ==========================================
-# 5. KOTAK METRIK SUMMARY (KPI UTAMA)
+# 5. PERBAIKAN KOTAK METRIK SUMMARY (KPI UTAMA)
+# Posisinya tepat berada di atas tulisan "Riwayat Laporan Harian"
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
-col_m1, col_m2, col_m3 = st.columns(3)
-val_spend = pd.to_numeric(df_filtered['Spend'], errors='coerce').sum() if not df_filtered.empty else 0
-val_komisi = pd.to_numeric(df_filtered['Total Komisi (Nett)'], errors='coerce').sum() if not df_filtered.empty else 0
-val_profit = pd.to_numeric(df_filtered['Profit'], errors='coerce').sum() if not df_filtered.empty else 0
 
-with col_m1: st.metric(label="💸 Total Pengeluaran Iklan", value=f"Rp {val_spend:,.0f}")
-with col_m2: st.metric(label="💰 Total Komisi Masuk (Nett)", value=f"Rp {val_komisi:,.0f}")
-with col_m3: st.metric(label="📈 Keuntungan Bersih (Profit)", value=f"Rp {val_profit:,.0f}")
+# Membuat susunan 5 Kolom Sejajar sesuai permintaan instruksi baru Anda
+col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
+
+val_spend = pd.to_numeric(df_filtered['Spend'], errors='coerce').sum() if not df_filtered.empty else 0
+val_komisi_iklan = pd.to_numeric(df_filtered['Komisi Iklan'], errors='coerce').sum() if not df_filtered.empty else 0
+val_komisi_organik = pd.to_numeric(df_filtered['Komisi Organik'], errors='coerce').sum() if not df_filtered.empty else 0
+
+# Matematika keuntungan iklan & total keuntungan gabungan
+val_keuntungan_iklan = val_komisi_iklan - val_spend
+val_total_keuntungan = pd.to_numeric(df_filtered['Profit'], errors='coerce').sum() if not df_filtered.empty else 0
+
+with col_m1: 
+    st.metric(label="💸 Total Pengeluaran Iklan", value=f"Rp {val_spend:,.0f}")
+
+with col_m2: 
+    st.metric(label="🎯 Total Komisi Iklan (Meta)", value=f"Rp {val_komisi_iklan:,.0f}")
+
+with col_m3: 
+    st.metric(label="📱 Total Komisi Organik (Shopee Video)", value=f"Rp {val_komisi_organik:,.0f}")
+
+with col_m4: 
+    # PERBAIKAN: Menentukan warna dinamis menggunakan HTML Markdown (Hijau = Untung, Merah = Rugi)
+    warna_teks_iklan = "green" if val_keuntungan_iklan >= 0 else "red"
+    st.markdown("**Keuntungan (Profit/Rugi) Iklan**")
+    st.markdown(
+        f"<h3 style='color: {warna_teks_iklan}; margin-top: 4px; margin-bottom: 0px; font-weight: bold;'>Rp {val_keuntungan_iklan:,.0f}</h3>", 
+        unsafe_allow_html=True
+    )
+
+with col_m5: 
+    st.metric(label="📈 Total Keuntungan (Iklan + Organik)", value=f"Rp {val_total_keuntungan:,.0f}")
 
 
 # ==========================================
 # 6. TABEL UTAMA & ACTION HAPUS DATA
 # ==========================================
+st.markdown("<br>", unsafe_allow_html=True)
 st.subheader("📋 Riwayat Laporan Harian")
 if df_filtered.empty:
     st.info("Belum ada data terekam pada periode ini.")
@@ -374,7 +400,6 @@ else:
                     hapus_laporan_aman(worksheet_tag, nama_laporan_klik, ["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
                     hapus_laporan_aman(worksheet_raw_sales, nama_laporan_klik, ["Nama Laporan", "Clean_Tag", "Nama Produk", "Kategori", "Item Terjual", "Komisi"])
                     
-                # Invalidate Cache agar otomatis reload setelah hapus data harian
                 if 'riwayat_summary' in st.session_state: del st.session_state['riwayat_summary']
                 st.toast("Sukses menghapus data lama!")
                 st.rerun()
@@ -383,7 +408,7 @@ else:
 
 
         # ==========================================
-        # 7. HASIL BEDAH DATA DETIL PER VIDEO (URUTAN BARU)
+        # 7. PERBAIKAN HASIL BEDAH DATA DETIL (ROAS & KEBOCORAN)
         # ==========================================
         st.markdown("---")
         st.subheader(f"🔍 Hasil Bedah Data Rinci: {nama_laporan_klik}")
@@ -399,14 +424,18 @@ else:
             total_spend_iklan = df_iklan_aktif['Spend'].sum()
             total_klik_meta = df_iklan_aktif['Klik_Meta'].sum()
             total_klik_shopee = df_iklan_aktif['Klik_Shopee'].sum()
-            roas_iklan_gabungan = (df_iklan_aktif['Komisi_Bersih'].sum() / total_spend_iklan) if total_spend_iklan > 0 else 0.0
             
-            # 🔥 Urutan Sesuai Permintaan: Spend Iklan, Klik Meta, Klik Shopee, ROAS
-            col_ad1, col_ad2, col_ad3, col_ad4 = st.columns(4)
+            # PERBAIKAN UTAMA: Matematika ROAS & Kebocoran Makro agar nilainya presisi & rasional
+            roas_iklan_gabungan = (df_iklan_aktif['Komisi_Bersih'].sum() / total_spend_iklan) if total_spend_iklan > 0 else 0.0
+            kebocoran_gabungan = max(0.0, ((total_klik_meta - total_klik_shopee) / total_klik_meta) * 100) if total_klik_meta > 0 else 0.0
+            
+            # Menampilkan ringkasan metrik iklan rinci dengan 5 Kolom agar lengkap dengan angka Kebocoran
+            col_ad1, col_ad2, col_ad3, col_ad4, col_ad5 = st.columns(5)
             with col_ad1: st.metric(label="💳 Total Spend Iklan", value=f"Rp {total_spend_iklan:,.0f}")
             with col_ad2: st.metric(label="🖱️ Total Klik Meta", value=f"{total_klik_meta:,.0f} Klik")
-            with col_ad3: st.metric(label="🛍️ Total Klik Shopee (Iklan Aktif)", value=f"{total_klik_shopee:,.0f} Klik")
-            with col_ad4: st.metric(label="📊 ROAS (Dari Iklan)", value=f"{roas_iklan_gabungan:,.2f}x")
+            with col_ad3: st.metric(label="🛍️ Total Klik Shopee (Iklan)", value=f"{total_klik_shopee:,.0f} Klik")
+            with col_ad4: st.metric(label="📊 ROAS (Murni Iklan)", value=f"{roas_iklan_gabungan:,.2f}x")
+            with col_ad5: st.metric(label="📉 Kebocoran Klik Iklan", value=f"{kebocoran_gabungan:,.2f}%")
             
             st.write("💡 *Klik salah satu baris di bawah ini untuk melihat detail produk:*")
 
@@ -433,7 +462,7 @@ else:
                     df_product_selected = df_all_sales[(df_all_sales['Nama Laporan'] == nama_laporan_klik) & (df_all_sales['Clean_Tag'] == tag_terpilih)].copy()
                     
                     if not df_product_selected.empty:
-                        kolom_nama_sh = cari_comm = cari_kolom(df_product_selected.columns, ['nama produk', 'product'], 'Nama Produk')
+                        kolom_nama_sh = cari_kolom(df_product_selected.columns, ['nama produk', 'product'], 'Nama Produk')
                         kolom_kat_sh = cari_kolom(df_product_selected.columns, ['kategori'], 'Kategori')
                         kolom_item_sh = cari_kolom(df_product_selected.columns, ['item terjual', 'jumlah'], 'Item Terjual')
                         kolom_komisi_sh = cari_kolom(df_product_selected.columns, ['komisi'], 'Komisi')
