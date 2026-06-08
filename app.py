@@ -470,14 +470,17 @@ else:
             roas_iklan_gabungan = (total_komisi_iklan / total_spend_iklan) if total_spend_iklan > 0 else 0.0
             kebocoran_gabungan = ((total_klik_meta - total_klik_shopee) / total_klik_meta) * 100 if total_klik_meta > 0 else 0.0
             
-            # --- TAMPILAN BARIS KEDUA: 4 METRIK TEKNIS ---
+            # --- TAMPILAN BARIS KEDUA: 4 METRIK TEKNIS (FONT SEKARANG SAMA SEMUA) ---
             col_op1, col_op2, col_op3, col_op4 = st.columns(4)
             with col_op1: 
-                st.metric(label="🖱️ Total Klik Meta", value=f"{total_klik_meta:,.0f}".replace(',', '.') + " Klik")
+                st.markdown(f"<div style='{style_label}'>🖱️ Total Klik Meta</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: #31333F;'>{total_klik_meta:,.0f}".replace(',', '.') + " Klik</div>", unsafe_allow_html=True)
             with col_op2: 
-                st.metric(label="🛍️ Total Klik Shopee (Iklan)", value=f"{total_klik_shopee:,.0f}".replace(',', '.') + " Klik")
+                st.markdown(f"<div style='{style_label}'>🛍️ Total Klik Shopee (Iklan)</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: #31333F;'>{total_klik_shopee:,.0f}".replace(',', '.') + " Klik</div>", unsafe_allow_html=True)
             with col_op3: 
-                st.metric(label="📊 ROAS (Murni Iklan)", value=f"{roas_iklan_gabungan:,.2f}x")
+                st.markdown(f"<div style='{style_label}'>📊 ROAS (Murni Iklan)</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: #31333F;'>{roas_iklan_gabungan:,.2f}x</div>", unsafe_allow_html=True)
             with col_op4: 
                 # Logika Kebocoran: Jika minus (artinya klik Shopee lebih banyak / aman) -> Hijau. Jika plus -> Merah.
                 warna_bocor = "#107C41" if kebocoran_gabungan <= 0 else "#A80000"
