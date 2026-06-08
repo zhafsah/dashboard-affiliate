@@ -168,8 +168,16 @@ def gaya_tabel_detail(row):
 
 def gaya_tabel_summary(row):
     gaya = [''] * len(row)
+    
+    # 1. Logika Warna untuk kolom Profit (Menggunakan warna hex agar seragam)
     if 'Profit' in row.index:
-        gaya[row.index.get_loc('Profit')] = 'color: green; font-weight: bold;' if row['Profit'] >= 0 else 'color: red; font-weight: bold;'
+        gaya[row.index.get_loc('Profit')] = 'color: #107C41; font-weight: bold;' if row['Profit'] >= 0 else 'color: #A80000; font-weight: bold;'
+        
+    # 2. Logika Warna Baru untuk kolom Komisi Iklan (Hijau jika > Spend, Sebaliknya Merah)
+    if 'Komisi Iklan' in row.index and 'Spend' in row.index:
+        warna_komisi = 'color: #107C41; font-weight: bold;' if row['Komisi Iklan'] > row['Spend'] else 'color: #A80000; font-weight: bold;'
+        gaya[row.index.get_loc('Komisi Iklan')] = warna_komisi
+        
     return gaya
 
 with st.expander("📤 AREA UPLOAD FILE BARU", expanded=True):
