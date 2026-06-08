@@ -322,7 +322,7 @@ with col_m5:
 
 
 # ==========================================
-# 6. TABEL UTAMA & ACTION HAPUS DATA
+# 6. TABEL UTAMA & ACTION HAPUS DATA (MULTI-SELECT)
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
 st.subheader("📋 Riwayat Laporan Harian")
@@ -338,21 +338,26 @@ else:
         'Profit': lambda x: f"Rp {int(round(x)):,}".replace(',', '.')
     }).apply(gaya_tabel_summary, axis=1)
     
-    event_pilih = st.dataframe(df_styled_summary, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
+    # UBAH DISINI: selection_mode="multi-row"
+    event_pilih = st.dataframe(df_styled_summary, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="multi-row")
 
     if event_pilih and len(event_pilih["selection"]["rows"]) > 0:
-        indeks_terpilih = event_pilih["selection"]["rows"][0]
+        indeks_terpilih = event_pilih["selection"]["rows"]
         laporan_terpilih = df_filtered.iloc[indeks_terpilih]
-        nama_laporan_klik = laporan_terpilih["Nama Laporan"]
         
-        if st.button(f"🗑️ Hapus Laporan dari Cloud: {nama_laporan_klik}", type="secondary"):
+        # MENGAMBIL LIST NAMA LAPORAN YANG DICENTANG
+        daftar_laporan_klik = laporan_terpilih["Nama Laporan"].tolist()
+        
+        # Tombol hapus disesuaikan untuk menghapus banyak laporan sekaligus
+        if st.button(f"🗑️ Hapus {len(daftar_laporan_klik)} Laporan Terpilih dari Cloud", type="secondary"):
             try:
-                def hapus_laporan_aman(worksheet, nama_lap, headers):
+                def hapus_laporan_aman(worksheet, list_nama_lap, headers):
                     records = worksheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
                     if records:
                         df_temp = pd.DataFrame(records)
                         if "Nama Laporan" in df_temp.columns:
-                            df_sisa = df_temp[df_temp["Nama Laporan"] != nama_lap]
+                            # Filter: Buang baris yang nama laporannya ada di dalam daftar yang dicentang
+                            df_sisa = df_temp[~df_temp["Nama Laporan"].isin(list_nama_lap)]
                             worksheet.clear()
                             worksheet.append_row(headers)
                             if not df_sisa.empty:
@@ -362,12 +367,12 @@ else:
                                 worksheet.append_rows(df_sisa.values.tolist(), value_input_option='RAW')
 
                 with st.spinner("Menghapus data di Cloud..."):
-                    hapus_laporan_aman(worksheet_summary, nama_laporan_klik, ["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
-                    hapus_laporan_aman(worksheet_tag, nama_laporan_klik, ["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
-                    hapus_laporan_aman(worksheet_raw_sales, nama_laporan_klik, ["Nama Laporan", "Clean_Tag", "Nama Produk", "Kategori", "Item Terjual", "Komisi"])
+                    hapus_laporan_aman(worksheet_summary, daftar_laporan_klik, ["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
+                    hapus_laporan_aman(worksheet_tag, daftar_laporan_klik, ["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
+                    hapus_laporan_aman(worksheet_raw_sales, daftar_laporan_klik, ["Nama Laporan", "Clean_Tag", "Nama Produk", "Kategori", "Item Terjual", "Komisi"])
                     
                 if 'riwayat_summary' in st.session_state: del st.session_state['riwayat_summary']
-                st.toast("Sukses menghapus data lama!")
+                st.toast("Sukses menghapus data yang dipilih!")
                 st.rerun()
             except Exception as del_e:
                 st.error(f"Gagal menghapus: {str(del_e)}")
@@ -377,16 +382,29 @@ else:
         # 7. HASIL BEDAH DATA DETIL (DI-SPLIT ATAS & BAWAH)
         # ==========================================
         st.markdown("---")
-        st.subheader(f"🔍 Hasil Bedah Data Rinci: {nama_laporan_klik}")
+        judul_tabel = f"🔍 Hasil Bedah Data Rinci: Gabungan {len(daftar_laporan_klik)} Laporan" if len(daftar_laporan_klik) > 1 else f"🔍 Hasil Bedah Data Rinci: {daftar_laporan_klik[0]}"
+        st.subheader(judul_tabel)
         
         df_detail_tampil = st.session_state.get('cache_tag', pd.DataFrame())
         if not df_detail_tampil.empty and 'Nama Laporan' in df_detail_tampil.columns:
-            df_detail_tampil = df_detail_tampil[df_detail_tampil['Nama Laporan'] == nama_laporan_klik].copy()
+            # UBAH DISINI: Filter menggunakan .isin() untuk mengambil banyak laporan
+            df_detail_tampil = df_detail_tampil[df_detail_tampil['Nama Laporan'].isin(daftar_laporan_klik)].copy()
         else:
             df_detail_tampil = pd.DataFrame()
 
         if not df_detail_tampil.empty:
-            # Rekalkulasi Dinamis Pengunci Formula Akurasi Tinggi
+            # UBAH DISINI: Karena laporan digabung, kita harus menjumlahkan Tag yang sama dari tanggal yang berbeda
+            df_detail_tampil = df_detail_tampil.groupby(['Clean_Tag', 'Tipe']).agg({
+                'Spend': 'sum',
+                'Klik_Meta': 'sum',
+                'Klik_Shopee': 'sum',
+                'Pesanan': 'sum',
+                'Komisi_Kotor': 'sum',
+                'Komisi_Bersih': 'sum',
+                'Profit_Rugi': 'sum'
+            }).reset_index()
+
+            # Rekalkulasi Dinamis Pengunci Formula Akurasi Tinggi (Dihitung SETELAH digabung)
             df_detail_tampil['ROAS'] = df_detail_tampil.apply(lambda r: r['Komisi_Bersih'] / r['Spend'] if r['Spend'] > 0 else 0.0, axis=1)
             df_detail_tampil['Kebocoran'] = df_detail_tampil.apply(lambda r: ((r['Klik_Meta'] - r['Klik_Shopee']) / r['Klik_Meta']) * 100 if r['Klik_Meta'] > 0 else 0.0, axis=1)
 
@@ -467,7 +485,8 @@ else:
                 
                 df_all_sales = st.session_state.get('cache_sales', pd.DataFrame())
                 if not df_all_sales.empty:
-                    df_product_selected = df_all_sales[(df_all_sales['Nama Laporan'] == nama_laporan_klik) & (df_all_sales['Clean_Tag'] == tag_terpilih)].copy()
+                    # UBAH DISINI: Filter juga menggunakan .isin() untuk membaca semua penjualan dari tanggal-tanggal yang dipilih
+                    df_product_selected = df_all_sales[(df_all_sales['Nama Laporan'].isin(daftar_laporan_klik)) & (df_all_sales['Clean_Tag'] == tag_terpilih)].copy()
                     
                     if not df_product_selected.empty:
                         kolom_nama_sh = cari_kolom(df_product_selected.columns, ['nama produk', 'product'], 'Nama Produk')
