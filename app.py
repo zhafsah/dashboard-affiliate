@@ -184,8 +184,9 @@ with st.expander("📤 AREA UPLOAD FILE BARU", expanded=True):
         tombol_proses = st.form_submit_button("🚀 Proses & Bedah Laporan", use_container_width=True)
 
 if tombol_proses:
-    if len(uploaded_files) < 3:
-        st.error("Silakan unggah minimal 3 file CSV terlebih dahulu.")
+    # 1. Ubah validasi minimal upload menjadi 2 file
+    if len(uploaded_files) < 2:
+        st.error("Silakan unggah minimal 2 file CSV (Data Meta & Data Penjualan) terlebih dahulu.")
     elif nama_laporan in st.session_state['riwayat_summary']['Nama Laporan'].values:
         st.warning("⚠️ Nama laporan sudah ada. Silakan hapus laporan lama terlebih dahulu.")
     else:
@@ -197,7 +198,14 @@ if tombol_proses:
                 elif 'Klik ID' in df_temp.columns and 'Tag_link' in df_temp.columns: df_clicks = df_temp
                 elif any(k in str(df_temp.columns).lower() for k in ['komisi per pesanan', 'komisi bersih', 'nama produk']): df_sales = df_temp
 
-        if df_meta is not None and df_clicks is not None and df_sales is not None:
+        # 2. Syarat utama: Hanya Data Meta dan Data Sales yang wajib terdeteksi
+        if df_meta is not None and df_sales is not None:
+            
+            # --- PENANGANAN JIKA FILE KLIK (CLICKS) TIDAK DIUNGGAH ---
+            if df_clicks is None:
+                df_clicks = pd.DataFrame(columns=['Klik ID', 'Tag_link', 'Clean_Tag'])
+            # ---------------------------------------------------------
+
             kolom_pesanan = cari_kolom(df_sales.columns, ['id pesanan', 'order id', 'no pesanan'], df_sales.columns[0])
             kolom_tag_sales = cari_kolom(df_sales.columns, ['tag_link1', 'tag link', 'sub id', 'tag_link'], 'Tag_link1')
             kolom_komisi_kotor = cari_kolom(df_sales.columns, ['komisi kotor', 'gross commission', 'total komisi per pesanan'], df_sales.columns[-1])
@@ -214,13 +222,22 @@ if tombol_proses:
             df_sales[kolom_jumlah_item] = pd.to_numeric(df_sales[kolom_jumlah_item], errors='coerce').fillna(1).astype(int)
 
             df_meta['Clean_Tag'] = df_meta['Nama iklan'].apply(bersihkan_tag)
-            df_clicks['Clean_Tag'] = df_clicks['Tag_link'].apply(bersihkan_tag)
             df_sales['Clean_Tag'] = df_sales[kolom_tag_sales].apply(bersihkan_tag)
+            
+            # 3. Terapkan pembersih tag ke data Klik HANYA jika file aslinya diunggah
+            if not df_clicks.empty and 'Tag_link' in df_clicks.columns:
+                df_clicks['Clean_Tag'] = df_clicks['Tag_link'].apply(bersihkan_tag)
 
             ad_tags = set(df_meta[df_meta['Jumlah yang dibelanjakan (IDR)'] > 0]['Clean_Tag'].unique())
 
             meta_sum = df_meta.groupby('Clean_Tag').agg(Spend=('Jumlah yang dibelanjakan (IDR)', 'sum'), Klik_Meta=('Klik tautan', 'sum')).reset_index()
-            click_sum = df_clicks.groupby('Clean_Tag').agg(Klik_Shopee=('Klik ID', 'count')).reset_index()
+            
+            # 4. Filter agar pengelompokan Klik tidak error saat datanya kosong
+            if not df_clicks.empty:
+                click_sum = df_clicks.groupby('Clean_Tag').agg(Klik_Shopee=('Klik ID', 'count')).reset_index()
+            else:
+                click_sum = pd.DataFrame(columns=['Clean_Tag', 'Klik_Shopee'])
+
             sales_sum = df_sales.groupby('Clean_Tag').agg(Pesanan=(kolom_pesanan, 'nunique'), Komisi_Kotor=(kolom_komisi_kotor, 'sum'), Komisi_Bersih=(kolom_komisi_bersih, 'sum')).reset_index()
 
             merged = pd.merge(meta_sum, click_sum, on='Clean_Tag', how='outer')
@@ -258,6 +275,8 @@ if tombol_proses:
                 st.rerun()
             except Exception as sheet_err:
                 st.error(f"Gagal menulis ke Cloud: {str(sheet_err)}")
+        else:
+            st.error("Gagal mendeteksi kolom Meta atau Kolom Penjualan. Pastikan file yang diunggah benar!")
 
 st.markdown("---")
 
