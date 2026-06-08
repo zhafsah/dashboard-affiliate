@@ -447,15 +447,18 @@ else:
                 st.markdown(f"<div style='{style_label}'>💳 Total Spend Iklan</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: #31333F;'>Rp {int(round(total_spend_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
             with col_ad2:
+                # Logika Warna Komisi Iklan: Hijau jika > Spend Iklan, jika tidak Merah
+                warna_komisi_iklan = "#107C41" if total_komisi_iklan > total_spend_iklan else "#A80000"
                 st.markdown(f"<div style='{style_label}'>🎯 Total Komisi Iklan</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='{style_value} color: #31333F;'>Rp {int(round(total_komisi_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: {warna_komisi_iklan};'>Rp {int(round(total_komisi_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
             with col_ad3:
                 warna_iklan = "#107C41" if total_keuntungan_iklan >= 0 else "#A80000"
                 st.markdown(f"<div style='{style_label}'>🔥 Keuntungan Iklan</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: {warna_iklan};'>Rp {int(round(total_keuntungan_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
             with col_ad4:
+                # Total Komisi Organik dipaksa selalu berwarna Hijau
                 st.markdown(f"<div style='{style_label}'>📱 Total Komisi Organik</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='{style_value} color: #31333F;'>Rp {int(round(total_komisi_organik)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: #107C41;'>Rp {int(round(total_komisi_organik)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
             with col_ad5:
                 warna_bersih = "#107C41" if total_keuntungan_bersih >= 0 else "#A80000"
                 st.markdown(f"<div style='{style_label}'>💎 Keuntungan Bersih</div>", unsafe_allow_html=True)
@@ -475,8 +478,10 @@ else:
                 st.markdown(f"<div style='{style_label}'>🖱️ Total Klik Meta</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: #31333F;'>{total_klik_meta:,.0f}".replace(',', '.') + " Klik</div>", unsafe_allow_html=True)
             with col_op2: 
+                # Logika Warna Klik Shopee: Hijau jika > Klik Meta, jika tidak Merah
+                warna_klik_shopee = "#107C41" if total_klik_shopee > total_klik_meta else "#A80000"
                 st.markdown(f"<div style='{style_label}'>🛍️ Total Klik Shopee (Iklan)</div>", unsafe_allow_html=True)
-                st.markdown(f"<div style='{style_value} color: #31333F;'>{total_klik_shopee:,.0f}".replace(',', '.') + " Klik</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: {warna_klik_shopee};'>{total_klik_shopee:,.0f}".replace(',', '.') + " Klik</div>", unsafe_allow_html=True)
             with col_op3: 
                 st.markdown(f"<div style='{style_label}'>📊 ROAS (Murni Iklan)</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: #31333F;'>{roas_iklan_gabungan:,.2f}x</div>", unsafe_allow_html=True)
@@ -491,10 +496,9 @@ else:
 
             tag_terpilih = None
 
-            # 🅰️ TABEL ATAS: KELOMPOK IKLAN AKTIF (Hapus Komisi_Bersih)
+            # 🅰️ TABEL ATAS: KELOMPOK IKLAN AKTIF
             st.markdown("#### 🎯 Kelompok Iklan Aktif")
             if not df_iklan_aktif.empty:
-                # Mengeluarkan 'Komisi_Bersih' dari list kolom penampil dataframe
                 df_styled_iklan = df_iklan_aktif[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']].style.format({
                     'Spend': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
                     'Komisi_Kotor': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
@@ -513,13 +517,12 @@ else:
             else:
                 st.info("Tidak ada tracker dengan status Iklan Aktif.")
 
-            # 🅱️ TABEL BAWAH: KELOMPOK ORGANIK / TIDAK AKTIF (Hapus Komisi_Bersih)
+            # 🅱️ TABEL BAWAH: KELOMPOK ORGANIK / TIDAK AKTIF
             st.markdown("#### 📱 Kelompok Organik / Tidak Aktif")
             df_organik = df_detail_tampil[df_detail_tampil['Tipe'] != "IKLAN (AKTIF)"].copy()
             df_organik = df_organik.sort_values(by=['Pesanan', 'Komisi_Kotor'], ascending=[False, False])
 
             if not df_organik.empty:
-                # Mengeluarkan 'Komisi_Bersih' dari list kolom penampil dataframe
                 df_styled_organik = df_organik[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']].style.format({
                     'Spend': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
                     'Komisi_Kotor': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
