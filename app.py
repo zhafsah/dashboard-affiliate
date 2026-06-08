@@ -438,22 +438,29 @@ else:
             total_komisi_organik = df_organik_calc['Komisi_Bersih'].sum()
             total_keuntungan_bersih = (total_komisi_iklan + total_komisi_organik) - total_spend_iklan
             
-            # --- TAMPILAN BARIS PERTAMA: 5 METRIK FINANSIAL ---
+            # --- TAMPILAN BARIS PERTAMA: 5 METRIK FINANSIAL (UKURAN & WARNA SERAGAM) ---
+            # CSS untuk menyamakan ukuran font agar persis seperti font st.metric bawaan Streamlit
+            style_label = "font-size: 14px; color: rgb(49, 51, 63); opacity: 0.8; font-weight: 400; margin-bottom: 2px;"
+            style_value = "font-size: 28px; font-weight: 600; margin-top: 0px; margin-bottom: 0px;"
+            
             col_ad1, col_ad2, col_ad3, col_ad4, col_ad5 = st.columns(5)
-            with col_ad1: 
-                st.metric(label="💳 Total Spend Iklan", value=f"Rp {int(round(total_spend_iklan)):,}".replace(',', '.'))
-            with col_ad2: 
-                st.metric(label="🎯 Total Komisi Iklan", value=f"Rp {int(round(total_komisi_iklan)):,}".replace(',', '.'))
-            with col_ad3: 
-                warna_iklan = "green" if total_keuntungan_iklan >= 0 else "red"
-                st.markdown("**🔥 Keuntungan Iklan**")
-                st.markdown(f"<h3 style='color: {warna_iklan}; margin-top: -10px;'>Rp {int(round(total_keuntungan_iklan)):,}".replace(',', '.') + "</h3>", unsafe_allow_html=True)
-            with col_ad4: 
-                st.metric(label="📱 Total Komisi Organik", value=f"Rp {int(round(total_komisi_organik)):,}".replace(',', '.'))
-            with col_ad5: 
-                warna_bersih = "green" if total_keuntungan_bersih >= 0 else "red"
-                st.markdown("**💎 Keuntungan Bersih**")
-                st.markdown(f"<h3 style='color: {warna_bersih}; margin-top: -10px;'>Rp {int(round(total_keuntungan_bersih)):,}".replace(',', '.') + "</h3>", unsafe_allow_html=True)
+            with col_ad1:
+                st.markdown(f"<div style='{style_label}'>💳 Total Spend Iklan</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: #31333F;'>Rp {int(round(total_spend_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
+            with col_ad2:
+                st.markdown(f"<div style='{style_label}'>🎯 Total Komisi Iklan</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: #31333F;'>Rp {int(round(total_komisi_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
+            with col_ad3:
+                warna_iklan = "#107C41" if total_keuntungan_iklan >= 0 else "#A80000" # Hijau Excel vs Merah Tua
+                st.markdown(f"<div style='{style_label}'>🔥 Keuntungan Iklan</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: {warna_iklan};'>Rp {int(round(total_keuntungan_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
+            with col_ad4:
+                st.markdown(f"<div style='{style_label}'>📱 Total Komisi Organik</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: #31333F;'>Rp {int(round(total_komisi_organik)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
+            with col_ad5:
+                warna_bersih = "#107C41" if total_keuntungan_bersih >= 0 else "#A80000"
+                st.markdown(f"<div style='{style_label}'>💎 Keuntungan Bersih</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: {warna_bersih};'>Rp {int(round(total_keuntungan_bersih)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
 
@@ -465,10 +472,17 @@ else:
             
             # --- TAMPILAN BARIS KEDUA: 4 METRIK TEKNIS ---
             col_op1, col_op2, col_op3, col_op4 = st.columns(4)
-            with col_op1: st.metric(label="🖱️ Total Klik Meta", value=f"{total_klik_meta:,.0f}".replace(',', '.') + " Klik")
-            with col_op2: st.metric(label="🛍️ Total Klik Shopee (Iklan)", value=f"{total_klik_shopee:,.0f}".replace(',', '.') + " Klik")
-            with col_op3: st.metric(label="📊 ROAS (Murni Iklan)", value=f"{roas_iklan_gabungan:,.2f}x")
-            with col_op4: st.metric(label="📉 Total Kebocoran", value=f"{kebocoran_gabungan:,.2f}%")
+            with col_op1: 
+                st.metric(label="🖱️ Total Klik Meta", value=f"{total_klik_meta:,.0f}".replace(',', '.') + " Klik")
+            with col_op2: 
+                st.metric(label="🛍️ Total Klik Shopee (Iklan)", value=f"{total_klik_shopee:,.0f}".replace(',', '.') + " Klik")
+            with col_op3: 
+                st.metric(label="📊 ROAS (Murni Iklan)", value=f"{roas_iklan_gabungan:,.2f}x")
+            with col_op4: 
+                # Logika Kebocoran: Jika minus (artinya klik Shopee lebih banyak / aman) -> Hijau. Jika plus -> Merah.
+                warna_bocor = "#107C41" if kebocoran_gabungan <= 0 else "#A80000"
+                st.markdown(f"<div style='{style_label}'>📉 Total Kebocoran</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: {warna_bocor};'>{kebocoran_gabungan:,.2f}%</div>", unsafe_allow_html=True)
             
             st.markdown("---")
             st.write("💡 *Klik salah satu baris pada tabel di bawah ini untuk melihat detail produk:*")
