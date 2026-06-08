@@ -406,13 +406,13 @@ else:
         
         df_detail_tampil = st.session_state.get('cache_tag', pd.DataFrame())
         if not df_detail_tampil.empty and 'Nama Laporan' in df_detail_tampil.columns:
-            # UBAH DISINI: Filter menggunakan .isin() untuk mengambil banyak laporan
+            # Filter menggunakan .isin() untuk mengambil banyak laporan
             df_detail_tampil = df_detail_tampil[df_detail_tampil['Nama Laporan'].isin(daftar_laporan_klik)].copy()
         else:
             df_detail_tampil = pd.DataFrame()
 
         if not df_detail_tampil.empty:
-            # UBAH DISINI: Karena laporan digabung, kita harus menjumlahkan Tag yang sama dari tanggal yang berbeda
+            # Karena laporan digabung, kita harus menjumlahkan Tag yang sama dari tanggal yang berbeda
             df_detail_tampil = df_detail_tampil.groupby(['Clean_Tag', 'Tipe']).agg({
                 'Spend': 'sum',
                 'Klik_Meta': 'sum',
@@ -439,7 +439,6 @@ else:
             total_keuntungan_bersih = (total_komisi_iklan + total_komisi_organik) - total_spend_iklan
             
             # --- TAMPILAN BARIS PERTAMA: 5 METRIK FINANSIAL (UKURAN & WARNA SERAGAM) ---
-            # CSS untuk menyamakan ukuran font agar persis seperti font st.metric bawaan Streamlit
             style_label = "font-size: 14px; color: rgb(49, 51, 63); opacity: 0.8; font-weight: 400; margin-bottom: 2px;"
             style_value = "font-size: 28px; font-weight: 600; margin-top: 0px; margin-bottom: 0px;"
             
@@ -451,7 +450,7 @@ else:
                 st.markdown(f"<div style='{style_label}'>🎯 Total Komisi Iklan</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: #31333F;'>Rp {int(round(total_komisi_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
             with col_ad3:
-                warna_iklan = "#107C41" if total_keuntungan_iklan >= 0 else "#A80000" # Hijau Excel vs Merah Tua
+                warna_iklan = "#107C41" if total_keuntungan_iklan >= 0 else "#A80000"
                 st.markdown(f"<div style='{style_label}'>🔥 Keuntungan Iklan</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: {warna_iklan};'>Rp {int(round(total_keuntungan_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
             with col_ad4:
@@ -482,7 +481,7 @@ else:
                 st.markdown(f"<div style='{style_label}'>📊 ROAS (Murni Iklan)</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: #31333F;'>{roas_iklan_gabungan:,.2f}x</div>", unsafe_allow_html=True)
             with col_op4: 
-                # Logika Kebocoran: Jika minus (artinya klik Shopee lebih banyak / aman) -> Hijau. Jika plus -> Merah.
+                # Logika Kebocoran: Jika minus -> Hijau. Jika plus -> Merah.
                 warna_bocor = "#107C41" if kebocoran_gabungan <= 0 else "#A80000"
                 st.markdown(f"<div style='{style_label}'>📉 Total Kebocoran</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: {warna_bocor};'>{kebocoran_gabungan:,.2f}%</div>", unsafe_allow_html=True)
@@ -492,13 +491,13 @@ else:
 
             tag_terpilih = None
 
-            # 🅰️ TABEL ATAS: KELOMPOK IKLAN AKTIF
+            # 🅰️ TABEL ATAS: KELOMPOK IKLAN AKTIF (Hapus Komisi_Bersih)
             st.markdown("#### 🎯 Kelompok Iklan Aktif")
             if not df_iklan_aktif.empty:
-                df_styled_iklan = df_iklan_aktif[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Komisi_Bersih', 'Profit_Rugi', 'ROAS']].style.format({
+                # Mengeluarkan 'Komisi_Bersih' dari list kolom penampil dataframe
+                df_styled_iklan = df_iklan_aktif[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']].style.format({
                     'Spend': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
                     'Komisi_Kotor': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
-                    'Komisi_Bersih': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
                     'Profit_Rugi': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
                     'ROAS': '{:,.2f}x', 
                     'Klik_Meta': lambda x: f"{int(x):,}".replace(',', '.'), 
@@ -514,16 +513,16 @@ else:
             else:
                 st.info("Tidak ada tracker dengan status Iklan Aktif.")
 
-            # 🅱️ TABEL BAWAH: KELOMPOK ORGANIK / TIDAK AKTIF (Urutan Penjualan Terbesar)
+            # 🅱️ TABEL BAWAH: KELOMPOK ORGANIK / TIDAK AKTIF (Hapus Komisi_Bersih)
             st.markdown("#### 📱 Kelompok Organik / Tidak Aktif")
             df_organik = df_detail_tampil[df_detail_tampil['Tipe'] != "IKLAN (AKTIF)"].copy()
-            df_organik = df_organik.sort_values(by=['Pesanan', 'Komisi_Bersih'], ascending=[False, False])
+            df_organik = df_organik.sort_values(by=['Pesanan', 'Komisi_Kotor'], ascending=[False, False])
 
             if not df_organik.empty:
-                df_styled_organik = df_organik[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Komisi_Bersih', 'Profit_Rugi', 'ROAS']].style.format({
+                # Mengeluarkan 'Komisi_Bersih' dari list kolom penampil dataframe
+                df_styled_organik = df_organik[['Tipe', 'Clean_Tag', 'Spend', 'Klik_Meta', 'Klik_Shopee', 'Pesanan', 'Kebocoran', 'Komisi_Kotor', 'Profit_Rugi', 'ROAS']].style.format({
                     'Spend': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
                     'Komisi_Kotor': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
-                    'Komisi_Bersih': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
                     'Profit_Rugi': lambda x: f"Rp {int(round(x)):,}".replace(',', '.'),
                     'ROAS': '{:,.2f}x', 
                     'Klik_Meta': lambda x: f"{int(x):,}".replace(',', '.'), 
@@ -532,12 +531,37 @@ else:
                     'Kebocoran': '{:,.2f}%'
                 }).apply(gaya_tabel_detail, axis=1)
                 
-                event_klik_organik = st.dataframe(df_styled_organik, use_container_width=True, hide_index=True, on_select="rerun", key="grid_organik", selection_mode="single-row")
+                event_klik_organik = st.dataframe(df_styled_organik, use_container_width=True, hide_index=True, on_select="rerun", key="grid_organik_aktif", selection_mode="single-row")
                 if event_klik_organik and len(event_klik_organik["selection"]["rows"]) > 0:
                     indeks_organik = event_klik_organik["selection"]["rows"][0]
                     tag_terpilih = df_organik.iloc[indeks_organik]["Clean_Tag"]
             else:
-                st.info("Tidak ada tracker dengan status Organik / Tidak Aktif.")
+                st.info("Tidak ada tracker dengan status Organik.")
+
+            # --- SUB-DETAIL: RAW DATA DATA PRODUK BERDASARKAN SELECTION ---
+            if tag_terpilih:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.subheader(f"📦 Rincian Produk Terjual pada Tag: {tag_terpilih}")
+                
+                df_raw_sales = st.session_state.get('cache_sales', pd.DataFrame())
+                if not df_raw_sales.empty and 'Nama Laporan' in df_raw_sales.columns and 'Clean_Tag' in df_raw_sales.columns:
+                    df_sales_filtered = df_raw_sales[(df_raw_sales['Nama Laporan'].isin(daftar_laporan_klik)) & (df_raw_sales['Clean_Tag'] == tag_terpilih)].copy()
+                    
+                    if not df_sales_filtered.empty:
+                        df_sales_sum = df_sales_filtered.groupby(['Nama Produk', 'Kategori']).agg({
+                            'Item Terjual': 'sum',
+                            'Komisi': 'sum'
+                        }).reset_index().sort_values(by='Item Terjual', ascending=False)
+                        
+                        df_styled_sales = df_sales_sum.style.format({
+                            'Item Terjual': lambda x: f"{int(x):,}".replace(',', '.'),
+                            'Komisi': lambda x: f"Rp {int(round(x)):,}".replace(',', '.')
+                        })
+                        st.dataframe(df_styled_sales, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Tidak ada data produk spesifik yang terekam untuk tag ini.")
+                else:
+                    st.info("Database produk kosong.")
 
 
             # ==========================================
