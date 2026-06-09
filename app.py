@@ -327,10 +327,9 @@ if not df_filtered.empty:
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Memaksa sistem menggunakan font-family asli Streamlit agar bentuk huruf sama persis
-font_sistem = "font-family: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;"
-style_label_top = f"{font_sistem} font-size: 14px; color: rgb(49, 51, 63); opacity: 0.8; font-weight: 400; margin-bottom: 2px; line-height: 1.2;"
-style_value_top = f"{font_sistem} font-size: 28px; font-weight: 600; margin-top: 0px; margin-bottom: 0px; line-height: 1.2;"
+# Definisikan template style agar bisa digunakan di metrik summary atas
+style_label_top = "font-size: 14px; color: rgb(49, 51, 63); opacity: 0.8; font-weight: 400; margin-bottom: 2px;"
+style_value_top = "font-size: 28px; font-weight: 600; margin-top: 0px; margin-bottom: 0px;"
 
 col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
 
@@ -347,7 +346,7 @@ with col_m2:
 with col_m3: 
     st.metric(label="📱 Total Komisi Organik", value=f"Rp {int(round(val_komisi_organik)):,}".replace(',', '.'))
 with col_m4: 
-    # Ditambahkan emotikon 💰 dan disesuaikan warna serta font-family-nya
+    # PERBAIKAN: Menggunakan div custom style agar font 100% sama dengan metrik lainnya
     warna_teks_iklan = "#107C41" if val_keuntungan_iklan >= 0 else "#A80000"
     st.markdown(f"<div style='{style_label_top}'>💰 Keuntungan Iklan</div>", unsafe_allow_html=True)
     st.markdown(f"<div style='{style_value_top} color: {warna_teks_iklan};'>Rp {int(round(val_keuntungan_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
