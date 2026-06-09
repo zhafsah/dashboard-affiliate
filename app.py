@@ -326,6 +326,11 @@ if not df_filtered.empty:
 # 5. KOTAK METRIK SUMMARY INDONESIA PALETTE
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
+
+# Definisikan template style agar bisa digunakan di metrik summary atas
+style_label_top = "font-size: 14px; color: rgb(49, 51, 63); opacity: 0.8; font-weight: 400; margin-bottom: 2px;"
+style_value_top = "font-size: 28px; font-weight: 600; margin-top: 0px; margin-bottom: 0px;"
+
 col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
 
 val_spend = pd.to_numeric(df_filtered['Spend'], errors='coerce').sum() if not df_filtered.empty else 0
@@ -341,9 +346,10 @@ with col_m2:
 with col_m3: 
     st.metric(label="📱 Total Komisi Organik", value=f"Rp {int(round(val_komisi_organik)):,}".replace(',', '.'))
 with col_m4: 
-    warna_teks_iklan = "green" if val_keuntungan_iklan >= 0 else "red"
-    st.markdown("**Keuntungan Iklan**")
-    st.markdown(f"<h3 style='color: {warna_teks_iklan}; margin-top: 4px; font-weight: bold;'>Rp {int(round(val_keuntungan_iklan)):,}".replace(',', '.') + "</h3>", unsafe_allow_html=True)
+    # PERBAIKAN: Menggunakan div custom style agar font 100% sama dengan metrik lainnya
+    warna_teks_iklan = "#107C41" if val_keuntungan_iklan >= 0 else "#A80000"
+    st.markdown(f"<div style='{style_label_top}'>Keuntungan Iklan</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='{style_value_top} color: {warna_teks_iklan};'>Rp {int(round(val_keuntungan_iklan)):,}".replace(',', '.') + "</div>", unsafe_allow_html=True)
 with col_m5: 
     st.metric(label="📈 Keuntungan Bersih (Total)", value=f"Rp {int(round(val_total_keuntungan)):,}".replace(',', '.'))
 
