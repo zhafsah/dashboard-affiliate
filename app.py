@@ -480,8 +480,11 @@ else:
             roas_iklan_gabungan = (total_komisi_iklan / total_spend_iklan) if total_spend_iklan > 0 else 0.0
             kebocoran_gabungan = ((total_klik_meta - total_klik_shopee) / total_klik_meta) * 100 if total_klik_meta > 0 else 0.0
             
-            # --- TAMPILAN BARIS KEDUA: 4 METRIK TEKNIS (FONT SEKARANG SAMA SEMUA) ---
-            col_op1, col_op2, col_op3, col_op4 = st.columns(4)
+            # Tambahkan variabel total pesanan gabungan terlebih dahulu sebelum st.columns
+            total_pesanan_gabungan = df_detail_tampil['Pesanan'].sum()
+
+            # --- TAMPILAN BARIS KEDUA: 5 METRIK TEKNIS (DITAMBAH TOTAL PESANAN) ---
+            col_op1, col_op2, col_op3, col_op4, col_op5 = st.columns(5)
             with col_op1: 
                 st.markdown(f"<div style='{style_label}'>🖱️ Total Klik Meta</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: #31333F;'>{total_klik_meta:,.0f}".replace(',', '.') + " Klik</div>", unsafe_allow_html=True)
@@ -491,9 +494,13 @@ else:
                 st.markdown(f"<div style='{style_label}'>🛍️ Total Klik Shopee (Iklan)</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: {warna_klik_shopee};'>{total_klik_shopee:,.0f}".replace(',', '.') + " Klik</div>", unsafe_allow_html=True)
             with col_op3: 
+                # Metrik Baru: Total Pesanan diletakkan di sebelah kanan Klik Shopee
+                st.markdown(f"<div style='{style_label}'>📦 Total Pesanan (All)</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='{style_value} color: #107C41;'>{total_pesanan_gabungan:,.0f}".replace(',', '.') + " Pesanan</div>", unsafe_allow_html=True)
+            with col_op4: 
                 st.markdown(f"<div style='{style_label}'>📊 ROAS (Murni Iklan)</div>", unsafe_allow_html=True)
                 st.markdown(f"<div style='{style_value} color: #31333F;'>{roas_iklan_gabungan:,.2f}x</div>", unsafe_allow_html=True)
-            with col_op4: 
+            with col_op5: 
                 # Logika Kebocoran: Jika minus -> Hijau. Jika plus -> Merah.
                 warna_bocor = "#107C41" if kebocoran_gabungan <= 0 else "#A80000"
                 st.markdown(f"<div style='{style_label}'>📉 Total Kebocoran</div>", unsafe_allow_html=True)
