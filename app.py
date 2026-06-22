@@ -601,7 +601,8 @@ else:
                     df_product_selected = df_all_sales[(df_all_sales['Nama Laporan'].isin(daftar_laporan_klik)) & (df_all_sales['Clean_Tag'] == tag_terpilih)].copy()
                     
                     if not df_product_selected.empty:
-                        kolom_nama_sh = cari_kolom(df_product_selected.columns, ['nama produk', 'product'], 'Nama Produk')
+                        # Ditambahkan kata 'nama barange' untuk membaca kolom K file komisi affiliate Shopee
+                        kolom_nama_sh = cari_kolom(df_product_selected.columns, ['nama produk', 'product', 'nama barange'], 'Nama Produk')
                         kolom_kat_sh = cari_kolom(df_product_selected.columns, ['kategori'], 'Kategori')
                         kolom_item_sh = cari_kolom(df_product_selected.columns, ['item terjual', 'jumlah'], 'Item Terjual')
                         kolom_komisi_sh = cari_kolom(df_product_selected.columns, ['komisi'], 'Komisi')
