@@ -218,8 +218,9 @@ if tombol_proses:
             kolom_tag_sales = cari_kolom(df_sales.columns, ['tag_link1', 'tag link', 'sub id', 'tag_link'], 'Tag_link1')
             kolom_komisi_kotor = cari_kolom(df_sales.columns, ['komisi kotor', 'gross commission', 'total komisi per pesanan'], df_sales.columns[-1])
             kolom_komisi_bersih = cari_kolom(df_sales.columns, ['komisi bersih', 'net commission', 'nett commission'], kolom_komisi_kotor)
-            kolom_nama_produk = cari_kolom(df_sales.columns, ['nama produk', 'product name', 'info produk'], 'Nama Produk')
-            kolom_kategori_produk = cari_kolom(df_sales.columns, ['kategori'], 'Kategori')
+            # PERBAIKAN: Tambahkan 'nama barange' dan 'l1 kategori' ke engine pemroses utama
+            kolom_nama_produk = cari_kolom(df_sales.columns, ['nama produk', 'product name', 'info produk', 'nama barange'], 'Nama Produk')
+            kolom_kategori_produk = cari_kolom(df_sales.columns, ['kategori', 'l1 kategori'], 'Kategori')
             kolom_jumlah_item = cari_kolom(df_sales.columns, ['item terjual', 'jumlah', 'qty'], 'Item Terjual')
 
             df_meta['Jumlah yang dibelanjakan (IDR)'] = bersihkan_angka_sakti(df_meta['Jumlah yang dibelanjakan (IDR)'])
