@@ -7,7 +7,7 @@ import json
 import io
 
 # ==========================================
-# 0. FUNGSI GLOBAL PEMBERSIH ANGKA SAKTI
+# 0. FUNGSI GLOBAL PEMBERSIH ANGKA & MAPPING TRAFFIC
 # ==========================================
 def bersihkan_angka_sakti(series):
     def konversi_nilai(val):
@@ -43,24 +43,81 @@ def bersihkan_angka_sakti(series):
             
     return series.apply(konversi_nilai)
 
+def map_sumber_traffic_click(val):
+    if pd.isna(val) or str(val).strip() == '': return 'Lainnya / Direct'
+    v = str(val).strip().lower()
+    if 'shopeevideo' in v or 'shopee video' in v: return 'Shopee Video'
+    if 'facebook' in v or 'fb' in v: return 'Facebook'
+    if 'instagram' in v or 'ig' in v: return 'Instagram'
+    if 'youtube' in v or 'yt' in v: return 'YouTube'
+    if 'tiktok' in v or 'tt' in v: return 'TikTok'
+    return str(val).strip()
+
+def map_sumber_traffic_sales(row):
+    col_content = cari_kolom(row.index, ['content type', 'tipe konten', 'sumber konten'], '')
+    col_platform = cari_kolom(row.index, ['platform', 'saluran', 'channel'], '')
+    
+    content = str(row.get(col_content, '')).strip() if col_content else ''
+    platform = str(row.get(col_platform, '')).strip() if col_platform else ''
+    
+    if content and content.lower() not in ['nan', 'none', '', 'null']:
+        return content
+    if platform and platform.lower() not in ['nan', 'none', '', 'null']:
+        p = platform.lower()
+        if 'shopeevideo' in p or 'shopee video' in p: return 'Shopee Video'
+        return platform
+    return 'Organik / Lainnya'
+
 
 # ==========================================
-# 1. PENGATURAN HALAMAN & KONEKSI GOOGLE SHEETS
+# 1. PENGATURAN HALAMAN & TEMA VISUAL BARU
 # ==========================================
-st.set_page_config(page_title="Affiliate Advanced Analytics", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Shopee Affiliate Intelligence Studio", layout="wide", initial_sidebar_state="expanded")
 
-# Kustomisasi CSS untuk Tampilan Modern & Bersih
+# Kustomisasi CSS: Tema Emerald & Indigo Modern
 st.markdown("""
     <style>
-    .main .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    h1 { font-weight: 800; color: #1E293B; letter-spacing: -0.5px; }
-    h2, h3, h4 { font-weight: 700; color: #334155; }
-    .stButton>button { border-radius: 8px; font-weight: 500; transition: all 0.2s; }
-    .stButton>button:hover { transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-    div[data-testid="stExpander"] { background-color: #F8FAFC; border-radius: 10px; border: 1px solid #E2E8F0; }
-    .metric-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; padding: 1.25rem; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .metric-label { font-size: 0.875rem; color: #64748B; font-weight: 500; margin-bottom: 0.25rem; }
-    .metric-value { font-size: 1.625rem; font-weight: 700; color: #0F172A; }
+    .main .block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
+    
+    /* Header Dashboard */
+    .dashboard-header {
+        background: linear-gradient(135deg, #0F172A 0%, #1E1B4B 50%, #0D9488 100%);
+        padding: 1.5rem 2rem;
+        border-radius: 16px;
+        color: #FFFFFF;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 10px 25px -5px rgba(13, 148, 136, 0.2);
+    }
+    .dashboard-header h1 { color: #FFFFFF !important; margin: 0; font-size: 1.8rem; font-weight: 800; letter-spacing: -0.5px; }
+    .dashboard-header p { color: #94A3B8; margin: 0.2rem 0 0 0; font-size: 0.9rem; }
+    
+    /* Kartu Metrik Modern */
+    .metric-card {
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-top: 4px solid #0D9488;
+        padding: 1.1rem 1.25rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 15px -3px rgba(0, 0, 0, 0.08);
+    }
+    .metric-label { font-size: 0.8rem; color: #64748B; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.3rem; }
+    .metric-value { font-size: 1.5rem; font-weight: 800; color: #0F172A; }
+    
+    /* Container & Filter Styling */
+    .filter-container {
+        background-color: #F8FAFC;
+        padding: 1rem;
+        border-radius: 14px;
+        border: 1px solid #E2E8F0;
+        margin-bottom: 1.5rem;
+    }
+    .stButton>button { border-radius: 20px; font-weight: 600; transition: all 0.2s; }
+    div[data-testid="stExpander"] { background-color: #F1F5F9; border-radius: 12px; border: 1px solid #CBD5E1; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -100,13 +157,14 @@ def dapatkan_atau_buat_worksheet(nama_sheet, headers):
 worksheet_summary = dapatkan_atau_buat_worksheet("Riwayat_Summary", ["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
 worksheet_tag = dapatkan_atau_buat_worksheet("Riwayat_Tag", ["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
 worksheet_raw_sales = dapatkan_atau_buat_worksheet("Raw_Sales", ["Nama Laporan", "Clean_Tag", "Nama Produk", "Kategori", "Item Terjual", "Komisi"])
+worksheet_traffic = dapatkan_atau_buat_worksheet("Riwayat_Traffic", ["Nama Laporan", "Sumber_Traffic", "Klik", "Pesanan", "Komisi_Bersih"])
 
 
 # ==========================================
 # 2. SINKRONISASI OTOMATIS & INTERNAL CACHE
 # ==========================================
 if 'riwayat_summary' not in st.session_state:
-    with st.spinner("Sinkronisasi aman data cloud harian..."):
+    with st.spinner("Menghubungkan & Memuat Database Cloud..."):
         try:
             records_summary = worksheet_summary.get_all_records(value_render_option='UNFORMATTED_VALUE')
             df_load_summary = pd.DataFrame(records_summary) if records_summary else pd.DataFrame(columns=["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
@@ -116,6 +174,9 @@ if 'riwayat_summary' not in st.session_state:
             
             records_sales = worksheet_raw_sales.get_all_records(value_render_option='UNFORMATTED_VALUE')
             df_load_sales = pd.DataFrame(records_sales) if records_sales else pd.DataFrame()
+
+            records_traffic = worksheet_traffic.get_all_records(value_render_option='UNFORMATTED_VALUE')
+            df_load_traffic = pd.DataFrame(records_traffic) if records_traffic else pd.DataFrame()
 
             if not df_load_summary.empty:
                 df_load_summary['Tanggal'] = pd.to_datetime(df_load_summary['Tanggal'], errors='coerce').dt.date
@@ -130,9 +191,15 @@ if 'riwayat_summary' not in st.session_state:
                 if 'Komisi' in df_load_sales.columns: df_load_sales['Komisi'] = bersihkan_angka_sakti(df_load_sales['Komisi'])
                 if 'Item Terjual' in df_load_sales.columns: df_load_sales['Item Terjual'] = pd.to_numeric(df_load_sales['Item Terjual'], errors='coerce').fillna(1).astype(int)
 
+            if not df_load_traffic.empty:
+                for col in ['Klik', 'Pesanan', 'Komisi_Bersih']:
+                    if col in df_load_traffic.columns:
+                        df_load_traffic[col] = bersihkan_angka_sakti(df_load_traffic[col])
+
             st.session_state['riwayat_summary'] = df_load_summary
             st.session_state['cache_tag'] = df_load_tag
             st.session_state['cache_sales'] = df_load_sales
+            st.session_state['cache_traffic'] = df_load_traffic
         except Exception as e:
             st.error(f"Gagal memuat otomatis database internal: {str(e)}")
             st.stop()
@@ -142,8 +209,8 @@ if 'riwayat_summary' not in st.session_state:
 # 3. SIDEBAR PANEL (INPUT & UPLOAD)
 # ==========================================
 with st.sidebar:
-    st.markdown("### 📥 Upload File Baru")
-    st.write("Upload file laporan Shopee (dan Meta jika ada iklan) untuk dianalisis.")
+    st.markdown("### 📥 Panel Unggah Data")
+    st.caption("Unggah file CSV Shopee (Laporan Penjualan & Klik). File Meta Iklan opsional.")
     
     tanggal_laporan = st.date_input("Tanggal Laporan:", value=datetime.now().date())
     nama_bulan = BULAN_INDO[tanggal_laporan.month]
@@ -151,10 +218,9 @@ with st.sidebar:
     
     with st.form("form_upload", clear_on_submit=True):
         nama_laporan = st.text_input("Nama / Catatan Laporan:", value=default_nama)
-        uploaded_files = st.file_uploader("Pilih berkas CSV (Multi-upload):", type=["csv"], accept_multiple_files=True)
-        tombol_proses = st.form_submit_button("🚀 Proses Laporan", use_container_width=True)
+        uploaded_files = st.file_uploader("Pilih berkas CSV Shopee / Meta:", type=["csv"], accept_multiple_files=True)
+        tombol_proses = st.form_submit_button("🚀 Olah & Simpan Data", use_container_width=True)
 
-# Engine Pemroses Data Baru
 def bersihkan_tag(x):
     if pd.isna(x) or str(x).strip() == "" or str(x).lower() == "nan": return "Organik"
     s = str(x).strip()
@@ -191,9 +257,9 @@ def gaya_tabel_detail(row):
 def gaya_tabel_summary(row):
     gaya = [''] * len(row)
     if 'Profit' in row.index:
-        gaya[row.index.get_loc('Profit')] = 'color: #166534; font-weight: bold;' if row['Profit'] >= 0 else 'color: #991B1B; font-weight: bold;'
+        gaya[row.index.get_loc('Profit')] = 'color: #0D9488; font-weight: bold;' if row['Profit'] >= 0 else 'color: #991B1B; font-weight: bold;'
     if 'Komisi Iklan' in row.index and 'Spend' in row.index:
-        warna_komisi = 'color: #166534; font-weight: bold;' if row['Komisi Iklan'] > row['Spend'] else 'color: #991B1B; font-weight: bold;'
+        warna_komisi = 'color: #0D9488; font-weight: bold;' if row['Komisi Iklan'] > row['Spend'] else 'color: #991B1B; font-weight: bold;'
         gaya[row.index.get_loc('Komisi Iklan')] = warna_komisi
     return gaya
 
@@ -212,7 +278,7 @@ if tombol_proses:
             if df_temp is not None:
                 if 'Jumlah yang dibelanjakan (IDR)' in df_temp.columns or 'Nama iklan' in df_temp.columns:
                     list_df_meta.append(df_temp)
-                elif 'Klik ID' in df_temp.columns and 'Tag_link' in df_temp.columns:
+                elif 'Klik ID' in df_temp.columns and any(k in str(df_temp.columns).lower() for k in ['tag_link', 'perujuk', 'sub id']):
                     list_df_clicks.append(df_temp)
                 elif any(k in str(df_temp.columns).lower() for k in ['komisi per pesanan', 'komisi bersih', 'nama produk']):
                     list_df_sales.append(df_temp)
@@ -238,7 +304,7 @@ if tombol_proses:
             if not df_clicks.empty and 'Tag_link' in df_clicks.columns:
                 df_clicks['Clean_Tag'] = df_clicks['Tag_link'].apply(bersihkan_tag)
 
-            # Penanganan Kondisi Ada Data Meta vs Organik Murni
+            # Ekstraksi Data Meta jika Ada, jika Tidak -> Organik Murni
             if not df_meta.empty:
                 df_meta['Jumlah yang dibelanjakan (IDR)'] = bersihkan_angka_sakti(df_meta['Jumlah yang dibelanjakan (IDR)'])
                 df_meta['Klik tautan'] = bersihkan_angka_sakti(df_meta['Klik tautan']).fillna(0).astype(int) if 'Klik tautan' in df_meta.columns else 0
@@ -269,6 +335,23 @@ if tombol_proses:
             total_komisi_nett = df_sales[kolom_komisi_bersih].sum()
             total_profit = total_komisi_nett - total_spend
 
+            # Ekstraksi Sumber Trafik
+            if not df_clicks.empty:
+                col_perujuk = cari_kolom(df_clicks.columns, ['perujuk', 'referrer', 'sumber', 'sub id'], '')
+                df_clicks['Sumber_Traffic'] = df_clicks[col_perujuk].apply(map_sumber_traffic_click) if col_perujuk else 'Shopee Organic Click'
+                traffic_clicks = df_clicks.groupby('Sumber_Traffic').agg(Klik=('Klik ID', 'count')).reset_index()
+            else:
+                traffic_clicks = pd.DataFrame(columns=['Sumber_Traffic', 'Klik'])
+
+            df_sales['Sumber_Traffic'] = df_sales.apply(map_sumber_traffic_sales, axis=1)
+            traffic_sales = df_sales.groupby('Sumber_Traffic').agg(
+                Pesanan=(kolom_pesanan, 'nunique'),
+                Komisi_Bersih=(kolom_komisi_bersih, 'sum')
+            ).reset_index()
+
+            df_traffic_summary = pd.merge(traffic_clicks, traffic_sales, on='Sumber_Traffic', how='outer').fillna(0)
+
+            # Simpan Ke Sheets
             try:
                 worksheet_summary.append_row([str(tanggal_laporan), nama_laporan, float(total_spend), float(komisi_iklan_nett), float(komisi_organik_nett), float(total_komisi_nett), float(total_profit)], value_input_option='RAW')
                 
@@ -284,6 +367,11 @@ if tombol_proses:
                     rows_to_save.append([nama_laporan, str(row['Clean_Tag']), nama_prod_val, kat_prod_val, int(row[kolom_jumlah_item]), float(row[kolom_komisi_bersih])])
                 if rows_to_save: worksheet_raw_sales.append_rows(rows_to_save, value_input_option='RAW')
                 
+                rows_traffic_to_save = []
+                for _, row in df_traffic_summary.iterrows():
+                    rows_traffic_to_save.append([nama_laporan, str(row['Sumber_Traffic']), int(row['Klik']), int(row['Pesanan']), float(row['Komisi_Bersih'])])
+                if rows_traffic_to_save: worksheet_traffic.append_rows(rows_traffic_to_save, value_input_option='RAW')
+
                 if 'riwayat_summary' in st.session_state: del st.session_state['riwayat_summary']
                 st.success(f"✅ Data '{nama_laporan}' Berhasil Tersimpan!")
                 st.rerun()
@@ -294,13 +382,18 @@ if tombol_proses:
 
 
 # ==========================================
-# 4. KONTEN UTAMA & FILTER RENTANG WAKTU DATA
+# 4. KONTEN UTAMA & HEADER DASHBOARD
 # ==========================================
-st.title("📊 Affiliate Advanced Analytics")
+st.markdown("""
+    <div class="dashboard-header">
+        <h1>📊 Shopee Affiliate Intelligence Studio</h1>
+        <p>Platform analisis performa komisi organik & kampanye iklan multi-channel</p>
+    </div>
+""", unsafe_allow_html=True)
 
-# Card Filter Waktu yang Rapi
+# Container Filter Waktu
 with st.container():
-    st.markdown("<div style='background-color: #F8FAFC; padding: 1rem; border-radius: 10px; border: 1px solid #E2E8F0; margin-bottom: 1.5rem;'>", unsafe_allow_html=True)
+    st.markdown("<div class='filter-container'>", unsafe_allow_html=True)
     col_btn1, col_btn2, col_btn3, col_date = st.columns([1, 1, 1, 3])
     today = datetime.now().date()
 
@@ -322,7 +415,7 @@ with st.container():
             st.rerun()
 
     with col_date:
-        rentang_tanggal = st.date_input("Kustom Periode:", value=(st.session_state['start_filter'], st.session_state['end_filter']))
+        rentang_tanggal = st.date_input("Kustom Periode Filter:", value=(st.session_state['start_filter'], st.session_state['end_filter']))
 
     if isinstance(rentang_tanggal, tuple) and len(rentang_tanggal) == 2:
         filter_start, filter_end = rentang_tanggal
@@ -336,7 +429,7 @@ if not df_filtered.empty:
 
 
 # ==========================================
-# 5. KOTAK METRIK SUMMARY UTAMA (KUSTOM CARD)
+# 5. KOTAK METRIK SUMMARY UTAMA
 # ==========================================
 val_spend = pd.to_numeric(df_filtered['Spend'], errors='coerce').sum() if not df_filtered.empty else 0
 val_komisi_iklan = pd.to_numeric(df_filtered['Komisi Iklan'], errors='coerce').sum() if not df_filtered.empty else 0
@@ -347,17 +440,17 @@ val_total_keuntungan = pd.to_numeric(df_filtered['Profit'], errors='coerce').sum
 col_m1, col_m2, col_m3, col_m4, col_m5 = st.columns(5)
 
 with col_m1:
-    st.markdown(f"<div class='metric-card'><div class='metric-label'>💸 Pengeluaran Iklan</div><div class='metric-value' style='color: #475569;'>Rp {int(round(val_spend)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-card' style='border-top-color: #64748B;'><div class='metric-label'>💸 Spend Iklan</div><div class='metric-value' style='color: #475569;'>Rp {int(round(val_spend)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
 with col_m2:
-    st.markdown(f"<div class='metric-card'><div class='metric-label'>🎯 Komisi Iklan (Meta)</div><div class='metric-value' style='color: #0F172A;'>Rp {int(round(val_komisi_iklan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-card' style='border-top-color: #6366F1;'><div class='metric-label'>🎯 Komisi Iklan</div><div class='metric-value' style='color: #4338CA;'>Rp {int(round(val_komisi_iklan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
 with col_m3:
-    st.markdown(f"<div class='metric-card'><div class='metric-label'>📱 Komisi Organik</div><div class='metric-value' style='color: #0F172A;'>Rp {int(round(val_komisi_organik)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='metric-card' style='border-top-color: #0D9488;'><div class='metric-label'>📱 Komisi Organik</div><div class='metric-value' style='color: #0F766E;'>Rp {int(round(val_komisi_organik)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
 with col_m4:
-    warna_teks_iklan = "#166534" if val_keuntungan_iklan >= 0 else "#991B1B"
-    st.markdown(f"<div class='metric-card'><div class='metric-label'>💰 Keuntungan Iklan</div><div class='metric-value' style='color: {warna_teks_iklan};'>Rp {int(round(val_keuntungan_iklan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+    warna_teks_iklan = "#0D9488" if val_keuntungan_iklan >= 0 else "#991B1B"
+    st.markdown(f"<div class='metric-card' style='border-top-color: {warna_teks_iklan};'><div class='metric-label'>💰 Profit Iklan</div><div class='metric-value' style='color: {warna_teks_iklan};'>Rp {int(round(val_keuntungan_iklan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
 with col_m5:
-    warna_teks_total = "#166534" if val_total_keuntungan >= 0 else "#991B1B"
-    st.markdown(f"<div class='metric-card'><div class='metric-label'>📈 Keuntungan Bersih (Total)</div><div class='metric-value' style='color: {warna_teks_total};'>Rp {int(round(val_total_keuntungan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+    warna_teks_total = "#0D9488" if val_total_keuntungan >= 0 else "#991B1B"
+    st.markdown(f"<div class='metric-card' style='border-top-color: {warna_teks_total};'><div class='metric-label'>📈 Profit Bersih Total</div><div class='metric-value' style='color: {warna_teks_total};'>Rp {int(round(val_total_keuntungan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -406,7 +499,8 @@ else:
                         hapus_laporan_aman(worksheet_summary, daftar_laporan_klik, ["Tanggal", "Nama Laporan", "Spend", "Komisi Iklan", "Komisi Organik", "Total Komisi (Nett)", "Profit"])
                         hapus_laporan_aman(worksheet_tag, daftar_laporan_klik, ["Nama Laporan", "Tipe", "Clean_Tag", "Spend", "Klik_Meta", "Klik_Shopee", "Pesanan", "Kebocoran", "Komisi_Kotor", "Komisi_Bersih", "Profit_Rugi", "ROAS"])
                         hapus_laporan_aman(worksheet_raw_sales, daftar_laporan_klik, ["Nama Laporan", "Clean_Tag", "Nama Produk", "Kategori", "Item Terjual", "Komisi"])
-                        
+                        hapus_laporan_aman(worksheet_traffic, daftar_laporan_klik, ["Nama Laporan", "Sumber_Traffic", "Klik", "Pesanan", "Komisi_Bersih"])
+
                     if 'riwayat_summary' in st.session_state: del st.session_state['riwayat_summary']
                     st.toast("Sukses menghapus data yang dipilih!")
                     st.rerun()
@@ -417,7 +511,7 @@ else:
         # ==========================================
         # 7. HASIL BEDAH DATA DETIL (DASHBOARD BAWAH)
         # ==========================================
-        st.markdown("<hr style='border: 1px solid #E2E8F0;'>", unsafe_allow_html=True)
+        st.markdown("<hr style='border: 1px solid #CBD5E1;'>", unsafe_allow_html=True)
         judul_tabel = f"🔍 Hasil Bedah Data Rinci: Gabungan {len(daftar_laporan_klik)} Laporan" if len(daftar_laporan_klik) > 1 else f"🔍 Hasil Bedah Data Rinci: {daftar_laporan_klik[0]}"
         st.subheader(judul_tabel)
         
@@ -449,16 +543,16 @@ else:
             with col_ad1:
                 st.markdown(f"<div class='metric-card'><div class='metric-label'>💳 Total Spend Iklan</div><div class='metric-value'>Rp {int(round(total_spend_iklan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
             with col_ad2:
-                warna_komisi_iklan = "#166534" if total_komisi_iklan > total_spend_iklan else "#991B1B"
+                warna_komisi_iklan = "#0D9488" if total_komisi_iklan > total_spend_iklan else "#991B1B"
                 st.markdown(f"<div class='metric-card'><div class='metric-label'>🎯 Total Komisi Iklan</div><div class='metric-value' style='color: {warna_komisi_iklan};'>Rp {int(round(total_komisi_iklan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
             with col_ad3:
-                warna_iklan = "#166534" if total_keuntungan_iklan >= 0 else "#991B1B"
-                st.markdown(f"<div class='metric-card'><div class='metric-label'>🔥 Keuntungan Iklan</div><div class='metric-value' style='color: {warna_iklan};'>Rp {int(round(total_keuntungan_iklan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+                warna_iklan = "#0D9488" if total_keuntungan_iklan >= 0 else "#991B1B"
+                st.markdown(f"<div class='metric-card'><div class='metric-label'>🔥 Profit Iklan</div><div class='metric-value' style='color: {warna_iklan};'>Rp {int(round(total_keuntungan_iklan)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
             with col_ad4:
-                st.markdown(f"<div class='metric-card'><div class='metric-label'>📱 Total Komisi Organik</div><div class='metric-value' style='color: #166534;'>Rp {int(round(total_komisi_organik)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='metric-card'><div class='metric-label'>📱 Total Komisi Organik</div><div class='metric-value' style='color: #0D9488;'>Rp {int(round(total_komisi_organik)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
             with col_ad5:
-                warna_bersih = "#166534" if total_keuntungan_bersih >= 0 else "#991B1B"
-                st.markdown(f"<div class='metric-card'><div class='metric-label'>💎 Keuntungan Bersih</div><div class='metric-value' style='color: {warna_bersih};'>Rp {int(round(total_keuntungan_bersih)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+                warna_bersih = "#0D9488" if total_keuntungan_bersih >= 0 else "#991B1B"
+                st.markdown(f"<div class='metric-card'><div class='metric-label'>💎 Profit Bersih Total</div><div class='metric-value' style='color: {warna_bersih};'>Rp {int(round(total_keuntungan_bersih)):,}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
 
@@ -475,20 +569,24 @@ else:
             with col_op2: 
                 st.markdown(f"<div class='metric-card'><div class='metric-label'>🛍️ Klik Shopee (Iklan)</div><div class='metric-value'>{total_klik_shopee:,.0f}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
             with col_op3: 
-                st.markdown(f"<div class='metric-card'><div class='metric-label'>📦 Total Pesanan (All)</div><div class='metric-value' style='color: #166534;'>{total_pesanan_gabungan:,.0f}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='metric-card'><div class='metric-label'>📦 Total Pesanan (All)</div><div class='metric-value' style='color: #0D9488;'>{total_pesanan_gabungan:,.0f}".replace(',', '.') + "</div></div>", unsafe_allow_html=True)
             with col_op4: 
                 st.markdown(f"<div class='metric-card'><div class='metric-label'>📊 ROAS (Murni Iklan)</div><div class='metric-value'>{roas_iklan_gabungan:,.2f}x</div></div>", unsafe_allow_html=True)
             with col_op5: 
-                warna_bocor = "#166534" if kebocoran_gabungan <= 0 else "#991B1B"
+                warna_bocor = "#0D9488" if kebocoran_gabungan <= 0 else "#991B1B"
                 st.markdown(f"<div class='metric-card'><div class='metric-label'>📉 Total Kebocoran</div><div class='metric-value' style='color: {warna_bocor};'>{kebocoran_gabungan:,.2f}%</div></div>", unsafe_allow_html=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
-            st.write("💡 *Klik salah satu baris pada tabel di bawah untuk melihat rincian item:*")
+            st.write("💡 *Pilih salah satu tab di bawah untuk membedah data lebih rinci:*")
 
             tag_terpilih = None
 
-            # Pembagian Segmentasi Menggunakan Tab yang Bersih
-            tab_iklan, tab_organik = st.tabs(["🎯 Kelompok Iklan Aktif", "📱 Kelompok Organik / Tidak Aktif"])
+            # Pembagian Segmentasi Menggunakan 3 Tab
+            tab_iklan, tab_organik, tab_traffic = st.tabs([
+                "🎯 Kelompok Iklan Aktif", 
+                "📱 Kelompok Organik / Tidak Aktif", 
+                "🚦 Analisis Sumber Traffic"
+            ])
 
             with tab_iklan:
                 if not df_iklan_aktif.empty:
@@ -524,6 +622,32 @@ else:
                         tag_terpilih = df_organik.iloc[indeks_organik]["Clean_Tag"]
                 else:
                     st.info("Tidak ada tracker dengan status Organik.")
+
+            with tab_traffic:
+                df_all_traffic = st.session_state.get('cache_traffic', pd.DataFrame())
+                
+                if not df_all_traffic.empty and 'Nama Laporan' in df_all_traffic.columns:
+                    df_traffic_filtered = df_all_traffic[df_all_traffic['Nama Laporan'].isin(daftar_laporan_klik)].copy()
+                    
+                    if not df_traffic_filtered.empty:
+                        df_traffic_tampil = df_traffic_filtered.groupby('Sumber_Traffic').agg({
+                            'Klik': 'sum', 
+                            'Pesanan': 'sum', 
+                            'Komisi_Bersih': 'sum'
+                        }).reset_index()
+                        
+                        df_traffic_tampil = df_traffic_tampil.sort_values(by=['Komisi_Bersih', 'Klik'], ascending=[False, False])
+                        
+                        st.markdown("**Pemetaan Sumber Konversi (Platform & Konten)**")
+                        st.dataframe(df_traffic_tampil.style.format({
+                            'Klik': lambda x: f"{int(x):,}".replace(',', '.'),
+                            'Pesanan': lambda x: f"{int(x):,}".replace(',', '.'),
+                            'Komisi_Bersih': lambda x: f"Rp {int(round(x)):,}".replace(',', '.')
+                        }), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("⚠️ Data trafik untuk laporan ini kosong. Ini terjadi jika laporan diunggah sebelum sistem trafik diperbarui.\n\n**Solusi:** Silakan hapus laporan ini lalu unggah ulang file CSV-nya.")
+                else:
+                    st.warning("📭 Database sumber trafik (Riwayat_Traffic) masih kosong. Silakan unggah dan proses laporan baru agar data terekstrak.")
 
             if tag_terpilih:
                 st.markdown("<br>", unsafe_allow_html=True)
