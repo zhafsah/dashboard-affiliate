@@ -451,11 +451,8 @@ else:
 
             with tab_traffic:
                 df_all_traffic = st.session_state.get('cache_traffic', pd.DataFrame())
-                
-                # Cek apakah sheet Riwayat_Traffic sudah ada isinya
                 if not df_all_traffic.empty and 'Nama Laporan' in df_all_traffic.columns:
                     df_traffic_filtered = df_all_traffic[df_all_traffic['Nama Laporan'].isin(daftar_laporan_klik)].copy()
-                    
                     if not df_traffic_filtered.empty:
                         df_traffic_tampil = df_traffic_filtered.groupby('Sumber_Traffic').agg({'Klik': 'sum', 'Pesanan': 'sum', 'Komisi_Bersih': 'sum'}).reset_index()
                         df_traffic_tampil = df_traffic_tampil.sort_values(by=['Komisi_Bersih', 'Klik'], ascending=[False, False])
@@ -467,9 +464,7 @@ else:
                             'Komisi_Bersih': lambda x: f"Rp {int(round(x)):,}".replace(',', '.')
                         }), use_container_width=True, hide_index=True)
                     else:
-                        st.info("⚠️ Data trafik untuk laporan ini kosong. Ini biasanya karena laporan diunggah sebelum fitur trafik ditambahkan.\n\n**Solusi:** Silakan hapus laporan ini melalui tabel di atas, lalu upload ulang file CSV-nya agar data trafik ikut terekstrak.")
-                else:
-                    st.warning("📭 Database sumber trafik (Riwayat_Traffic) masih kosong. Silakan upload dan proses file CSV baru agar data trafik mulai tersimpan ke dalam sistem.")
+                        st.info("Belum ada data sumber trafik untuk laporan ini.")
 
             if tag_terpilih:
                 st.markdown("<br>", unsafe_allow_html=True)
